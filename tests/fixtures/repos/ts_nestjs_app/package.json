@@ -1,0 +1,9 @@
+{
+  "name": "ts-nestjs-app-fixture",
+  "version": "0.0.1",
+  "private": true,
+  "dependencies": {
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/core": "^10.0.0"
+  }
+}

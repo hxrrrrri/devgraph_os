@@ -4,6 +4,37 @@ DevGraph OS is a local-first AI context engine for software projects. It builds 
 
 Developers and AI coding agents should never read a codebase blindly again.
 
+## Feature Status
+
+Honest maturity per area. Treat *Beta* as working but rough edges; *Experimental* as best-effort with known gaps; *Planned* as not implemented.
+
+| Area | Status | Notes |
+|---|---|---|
+| Python extraction (tree-sitter primary, AST fallback) | Implemented | All `def`/`class`/imports/calls via tree-sitter; AST handles parse errors. |
+| JS/TS/TSX/Go/Rust/Java/C/C++/C#/Ruby/PHP/Kotlin/Swift/Scala/Bash extraction | Implemented | Real tree-sitter; provenance tested per language. |
+| FastAPI / Flask / Django route extraction | Beta | Decorator + URLconf patterns; mounted routers resolve to local paths only. |
+| Express-style JS/TS routes | Implemented | `app.get/post/...` pattern; `framework="express"` metadata. |
+| NestJS route plugin | Beta | `@Controller` prefix + `@Get/@Post/@Put/@Patch/@Delete/@Options/@Head/@All` decorators. Fixture: `tests/fixtures/repos/ts_nestjs_app`. |
+| Next.js file-based routes | Beta | `app/` (`page`, `route`, route groups stripped) + `pages/` (incl. `pages/api`). Fixture: `tests/fixtures/repos/react_next_app`. |
+| Spring / Rails / Laravel route plugins | Planned | — |
+| SQL table extraction + chunking | Implemented | `CREATE TABLE`, `ALTER`, `INSERT INTO`, `JOIN`. |
+| Migration risk detector (DROP, NOT NULL w/o default, FK, type change) | Implemented | Surfaces structured warnings in `review.json`. |
+| Review engine (changed symbols, impacted files, risk score, prioritized items) | Implemented | Rule-based; treat as decision support, not autonomous reviewer. |
+| Public API compatibility detector | Beta | Path/name heuristics; no signature-diff check yet. |
+| Test coverage gap heuristic | Beta | Graph-based "no related test" signal; not real coverage. |
+| Local SQLite graph + FTS + provenance | Implemented | Migrations, snapshots, memories. |
+| Local embeddings (`--local-hash`) | Beta | Deterministic local vectors; sentence-transformers opt-in. |
+| Incremental update + diff parser | Implemented | Hunks mapped to graph nodes. |
+| Cross-agent handoff (markdown + JSON) | Implemented | Branch, changed symbols, impacted files, continue prompt. |
+| MCP tool surface | Implemented | `build_or_update_graph`, `get_context`, `review_changes`, `query_graph`, memory. |
+| Dashboard (dark command center, code-split bundle) | Beta | Vite manualChunks split (largest chunk ~530 kB); no clustering on >10k node graphs yet. |
+| VS Code extension (commands, status view, CodeLens) | Beta | CodeLens for explain/review on Python/JS/TS; webview node-detail Planned. |
+| Fixture repos | Beta | `python_fastapi_service`, `ts_nestjs_app`, `react_next_app` landed; `ts_express_app`, `mixed_docs_config_repo`, `migration_database_repo` Planned. |
+| CI (lint, typecheck, security, tests, dashboard build, bundle-size guard) | Implemented | GitHub Actions; pnpm + pip caching. |
+| Stale-doc / claim verifier | Experimental | Conservative; not a full claim verifier. |
+| Wiki generation | Implemented | Markdown wiki from graph. |
+| Coverage thresholds in CI | Planned | Baseline not yet established. |
+
 ## What It Does
 
 - Indexes repositories into a SQLite-backed graph with deterministic provenance.

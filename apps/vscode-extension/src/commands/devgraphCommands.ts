@@ -20,8 +20,26 @@ export function registerDevGraphCommands(context: vscode.ExtensionContext, refre
     vscode.commands.registerCommand("devgraph.handoff", () => runAndShow(["handoff"], refresh)),
     vscode.commands.registerCommand("devgraph.copyHandoffPrompt", () => copyHandoffPrompt(refresh)),
     vscode.commands.registerCommand("devgraph.openReviewReport", () => openGeneratedReport(".devgraph/reports/review.md", ["review"], refresh)),
-    vscode.commands.registerCommand("devgraph.openOnboardingGuide", () => openGeneratedReport(".devgraph/reports/onboarding.md", ["onboard"], refresh))
+    vscode.commands.registerCommand("devgraph.openOnboardingGuide", () => openGeneratedReport(".devgraph/reports/onboarding.md", ["onboard"], refresh)),
+    vscode.commands.registerCommand("devgraph.explainSymbol", (symbol: string, uri: vscode.Uri) => explainSymbol(symbol, uri)),
+    vscode.commands.registerCommand("devgraph.reviewSymbol", (symbol: string, uri: vscode.Uri) => reviewSymbol(symbol, uri, refresh))
   );
+}
+
+async function explainSymbol(symbol: string, uri: vscode.Uri): Promise<void> {
+  if (!symbol) return;
+  const rel = uri ? vscode.workspace.asRelativePath(uri) : undefined;
+  const args = rel ? ["explain", `${rel}::${symbol}`] : ["explain", symbol];
+  await runAndShow(args);
+}
+
+async function reviewSymbol(symbol: string, uri: vscode.Uri, refresh: () => void): Promise<void> {
+  if (!uri) {
+    await runAndShow(["review", "--json"], refresh);
+    return;
+  }
+  const rel = vscode.workspace.asRelativePath(uri);
+  await runAndShow(["review", "--files", rel, "--json"], refresh);
 }
 
 async function explainCurrentFile(): Promise<void> {

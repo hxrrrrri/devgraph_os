@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest --collect-only -q)",
+      "Bash(python -m pytest -q)",
+      "Bash(python -m pytest)",
+      "Bash(ruff check *)",
+      "Bash(mypy devgraph *)",
+      "Bash(bandit -q -r devgraph -c pyproject.toml)",
+      "Bash(pnpm typecheck *)",
+      "Bash(pnpm --filter @devgraph/dashboard build)",
+      "Bash(pnpm --filter @devgraph/vscode-extension compile)",
+      "Bash(python -m devgraph --help)",
+      "Bash(python -c \"from devgraph.cli import main; main\\(['--help']\\)\")",
+      "Bash(devgraph --help)",
+      "Bash(devgraph init *)",
+      "Bash(devgraph build *)",
+      "Bash(devgraph status *)",
+      "Bash(python -c \"from tree_sitter_language_pack import get_parser; p=get_parser\\('python'\\); print\\('python OK'\\)\")",
+      "Bash(python -c 'from tree_sitter_language_pack import get_parser *)",
+      "Bash(rm tests/fixtures/sample_project/.devgraphignore tests/fixtures/sample_project/devgraph.toml)",
+      "Bash(rm -rf tests/fixtures/sample_project/.devgraph)",
+      "Bash(python -m pytest tests/unit/test_tree_sitter_provenance.py -v)",
+      "Bash(python -c ' *)",
+      "Bash(python -m pytest tests/unit/test_tree_sitter_provenance.py tests/unit/test_python_parser.py -v)",
+      "Bash(python -m pytest tests/unit/test_python_framework_routes.py -v)",
+      "Bash(python -m pytest tests/unit/test_migration_risk.py -v)",
+      "Bash(python -m pytest tests/integration/test_fastapi_fixture.py -v)",
+      "Bash(python -m pytest tests/unit/test_js_framework_routes.py -x)",
+      "Bash(mkdir -p tests/fixtures/repos/ts_nestjs_app/src/users tests/fixtures/repos/ts_nestjs_app/src/auth tests/fixtures/repos/react_next_app/app/users/\\\\[id\\\\] tests/fixtures/repos/react_next_app/app/api/health tests/fixtures/repos/react_next_app/pages/api 2>&1)",
+      "Bash(python -m pytest tests/integration/test_nestjs_fixture.py tests/integration/test_nextjs_fixture.py -x)"
+    ],
+    "additionalDirectories": [
+      "C:\\project_github\\devgraph_os\\tests\\fixtures\\repos\\react_next_app\\app\\users"
+    ]
+  }
+}

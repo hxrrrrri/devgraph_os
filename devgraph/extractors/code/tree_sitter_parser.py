@@ -26,7 +26,12 @@ from devgraph.extractors.base import (
 from devgraph.extractors.code.calls import parse_js_ts_calls
 from devgraph.extractors.code.imports import parse_js_ts_imports
 from devgraph.extractors.code.languages import language_for_path
-from devgraph.extractors.code.routes import parse_js_ts_routes
+from devgraph.extractors.code.routes import (
+    parse_js_ts_routes,
+    parse_nestjs_routes,
+    parse_nextjs_routes_for_path,
+    parse_python_routes,
+)
 from devgraph.extractors.code.sql import extract_table_references
 from devgraph.extractors.code.tests import is_test_symbol
 from devgraph.extractors.code.tree_sitter_adapter import TreeSitterSemanticAnalyzer
@@ -40,7 +45,17 @@ class CodeExtractor(BaseExtractor):
         record = make_file_record(root, path, "code", language, text)
         file_node = make_file_node(record)
         if language == "python":
-            nodes, edges, warnings = self._extract_python(record.path, text, file_node)
+            semantic = TreeSitterSemanticAnalyzer().analyze(
+                record.path, text, file_node, language, Path(record.path)
+            )
+            if semantic.available and any(node.type != "module" for node in semantic.nodes):
+                nodes, edges, warnings = semantic.nodes, semantic.edges, semantic.warnings
+            else:
+                nodes, edges, warnings = self._extract_python(record.path, text, file_node)
+            nodes, edges, warnings = _with_python_routes(
+                record.path, text, file_node, nodes, edges, warnings,
+                provenance="tree-sitter" if semantic.available else "python-ast",
+            )
         elif language in {"javascript", "typescript"}:
             nodes, edges, warnings = self._extract_js_ts(record.path, text, file_node, language)
         elif language == "sql":
@@ -619,6 +634,53 @@ def _containing_function_node(
     return next((node for node in symbols.values() if node.qualified_name == qn_name), symbols.get(best.name))
 
 
+def _with_python_routes(
+    file_path: str,
+    text: str,
+    file_node: Node,
+    nodes: list[Node],
+    edges: list[Edge],
+    warnings: list[str],
+    provenance: str,
+) -> tuple[list[Node], list[Edge], list[str]]:
+    module_node = next((node for node in nodes if node.type == "module"), file_node)
+    for method, route, line in parse_python_routes(text):
+        qn = f"{module_node.qualified_name}::{method} {route}"
+        route_node = Node(
+            id=node_id("api_endpoint", qn),
+            type="api_endpoint",
+            name=f"{method} {route}",
+            qualified_name=qn,
+            file_path=file_path,
+            line_start=line,
+            line_end=line,
+            language="python",
+            content_hash=file_node.content_hash,
+            metadata={"method": method, "path": route, "parser": provenance, "framework": _python_framework(method)},
+        )
+        nodes.append(route_node)
+        edges.append(
+            Edge(
+                id=edge_id(module_node.id, route_node.id, "routes_to", f"{provenance}:python:{method}:{route}"),
+                source_id=module_node.id,
+                target_id=route_node.id,
+                type="routes_to",
+                provenance_source=provenance,
+                file_path=file_path,
+                line=line,
+            )
+        )
+    return _dedupe_nodes(nodes), _dedupe_edges(edges), warnings
+
+
+def _python_framework(method: str) -> str:
+    if method == "WEBSOCKET":
+        return "fastapi"
+    if method == "ANY":
+        return "django-or-flask"
+    return "fastapi-or-flask"
+
+
 def _with_js_ts_routes(
     file_path: str,
     text: str,
@@ -631,32 +693,99 @@ def _with_js_ts_routes(
 ) -> tuple[list[Node], list[Edge], list[str]]:
     module_node = next((node for node in nodes if node.type == "module"), file_node)
     for method, route, line in parse_js_ts_routes(text):
-        qn = f"{module_node.qualified_name}::{method} {route}"
-        route_node = Node(
-            id=node_id("api_endpoint", qn),
-            type="api_endpoint",
-            name=f"{method} {route}",
-            qualified_name=qn,
+        _add_js_ts_route_node(
+            nodes,
+            edges,
+            file_node=file_node,
+            module_node=module_node,
             file_path=file_path,
-            line_start=line,
-            line_end=line,
             language=language,
-            content_hash=file_node.content_hash,
-            metadata={"method": method, "path": route, "parser": provenance},
+            method=method,
+            route=route,
+            line=line,
+            provenance=provenance,
+            framework="express",
         )
-        nodes.append(route_node)
-        edges.append(
-            Edge(
-                id=edge_id(module_node.id, route_node.id, "routes_to", f"{provenance}:{method}:{route}"),
-                source_id=module_node.id,
-                target_id=route_node.id,
-                type="routes_to",
-                provenance_source=provenance,
-                file_path=file_path,
-                line=line,
-            )
+    for method, route, line in parse_nestjs_routes(text):
+        _add_js_ts_route_node(
+            nodes,
+            edges,
+            file_node=file_node,
+            module_node=module_node,
+            file_path=file_path,
+            language=language,
+            method=method,
+            route=route,
+            line=line,
+            provenance=provenance,
+            framework="nestjs",
+        )
+    for method, route, line in parse_nextjs_routes_for_path(file_path, text):
+        _add_js_ts_route_node(
+            nodes,
+            edges,
+            file_node=file_node,
+            module_node=module_node,
+            file_path=file_path,
+            language=language,
+            method=method,
+            route=route,
+            line=line,
+            provenance=provenance,
+            framework="nextjs",
         )
     return _dedupe_nodes(nodes), _dedupe_edges(edges), warnings
+
+
+def _add_js_ts_route_node(
+    nodes: list[Node],
+    edges: list[Edge],
+    *,
+    file_node: Node,
+    module_node: Node,
+    file_path: str,
+    language: str | None,
+    method: str,
+    route: str,
+    line: int,
+    provenance: str,
+    framework: str,
+) -> None:
+    qn = f"{module_node.qualified_name}::{framework}::{method} {route}"
+    route_node = Node(
+        id=node_id("api_endpoint", qn),
+        type="api_endpoint",
+        name=f"{method} {route}",
+        qualified_name=qn,
+        file_path=file_path,
+        line_start=line,
+        line_end=line,
+        language=language,
+        content_hash=file_node.content_hash,
+        metadata={
+            "method": method,
+            "path": route,
+            "parser": provenance,
+            "framework": framework,
+        },
+    )
+    nodes.append(route_node)
+    edges.append(
+        Edge(
+            id=edge_id(
+                module_node.id,
+                route_node.id,
+                "routes_to",
+                f"{provenance}:{framework}:{method}:{route}",
+            ),
+            source_id=module_node.id,
+            target_id=route_node.id,
+            type="routes_to",
+            provenance_source=provenance,
+            file_path=file_path,
+            line=line,
+        )
+    )
 
 
 def _js_ts_symbols(text: str) -> list[tuple[str, str, int]]:

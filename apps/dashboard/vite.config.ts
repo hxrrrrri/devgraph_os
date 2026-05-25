@@ -7,6 +7,19 @@ export default defineConfig({
     proxy: {
       "/api": "http://127.0.0.1:38987"
     }
+  },
+  build: {
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "react-vendor": ["react", "react-dom"],
+          "graph-vendor": ["@xyflow/react"],
+          "charts-vendor": ["recharts"],
+          "motion-vendor": ["framer-motion"],
+          "icons-vendor": ["lucide-react"]
+        }
+      }
+    }
   }
 });
-

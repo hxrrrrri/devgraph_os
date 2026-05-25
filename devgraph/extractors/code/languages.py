@@ -20,7 +20,7 @@ TREE_SITTER_LANGUAGE_NAMES = {
     "java": "java",
     "c": "c",
     "cpp": "cpp",
-    "csharp": "c_sharp",
+    "csharp": "csharp",
     "ruby": "ruby",
     "php": "php",
     "kotlin": "kotlin",

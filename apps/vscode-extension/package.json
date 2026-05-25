@@ -26,7 +26,14 @@
     "onCommand:devgraph.handoff",
     "onCommand:devgraph.copyHandoffPrompt",
     "onCommand:devgraph.openReviewReport",
-    "onCommand:devgraph.openOnboardingGuide"
+    "onCommand:devgraph.openOnboardingGuide",
+    "onCommand:devgraph.explainSymbol",
+    "onCommand:devgraph.reviewSymbol",
+    "onLanguage:python",
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -47,6 +54,11 @@
           "type": "number",
           "default": 38987,
           "description": "Local dashboard port."
+        },
+        "devgraph.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show DevGraph Explain / Review impact CodeLens above functions and classes."
         }
       }
     },
@@ -67,7 +79,9 @@
       { "command": "devgraph.handoff", "title": "DevGraph: Generate Handoff" },
       { "command": "devgraph.copyHandoffPrompt", "title": "DevGraph: Copy Handoff Prompt" },
       { "command": "devgraph.openReviewReport", "title": "DevGraph: Open Review Report" },
-      { "command": "devgraph.openOnboardingGuide", "title": "DevGraph: Open Onboarding Guide" }
+      { "command": "devgraph.openOnboardingGuide", "title": "DevGraph: Open Onboarding Guide" },
+      { "command": "devgraph.explainSymbol", "title": "DevGraph: Explain Symbol" },
+      { "command": "devgraph.reviewSymbol", "title": "DevGraph: Review Symbol Impact" }
     ],
     "viewsContainers": {
       "activitybar": [

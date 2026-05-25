@@ -163,6 +163,7 @@ class ReviewResult(BaseModel):
     config_or_infra_changes: list[str] = Field(default_factory=list)
     database_or_schema_changes: list[str] = Field(default_factory=list)
     security_sensitive_changes: list[str] = Field(default_factory=list)
+    migration_warnings: list[dict[str, Any]] = Field(default_factory=list)
     diff_summary: list[str] = Field(default_factory=list)
     changed_snippets: dict[str, str] = Field(default_factory=dict)
     risk_score: int

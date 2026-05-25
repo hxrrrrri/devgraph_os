@@ -13,6 +13,10 @@ from devgraph.extractors.code.languages import TREE_SITTER_LANGUAGE_NAMES
 from devgraph.extractors.code.tests import is_test_symbol
 
 DEFINITION_TYPES = {
+    "python": {
+        "class_definition": "class",
+        "function_definition": "function",
+    },
     "javascript": {
         "class_declaration": "class",
         "function_declaration": "function",
@@ -118,10 +122,13 @@ DEFINITION_TYPES = {
 
 IMPORT_TYPES = {
     "import_statement",
+    "import_from_statement",
     "import_declaration",
     "import_spec",
     "use_declaration",
 }
+
+CALL_TYPES = {"call_expression", "call", "method_invocation", "function_call_expression"}
 
 COMPLEXITY_TYPES = {
     "if_statement",
@@ -251,7 +258,7 @@ class TreeSitterSemanticAnalyzer:
                             line=item.start_point[0] + 1,
                         )
                     )
-            if item.type == "call_expression":
+            if item.type in CALL_TYPES:
                 call_name = _call_name(item, source)
                 if not call_name:
                     continue
@@ -319,9 +326,19 @@ def _definition_name(node: Any, source: bytes) -> str | None:
     name = node.child_by_field_name("name")
     if name is not None:
         return _text(name, source)
+    declarator = node.child_by_field_name("declarator")
+    if declarator is not None:
+        nested = _definition_name(declarator, source)
+        if nested:
+            return nested
     for child in node.children:
-        if child.type in {"identifier", "type_identifier", "property_identifier"}:
+        if child.type in {"identifier", "type_identifier", "property_identifier", "field_identifier"}:
             return _text(child, source)
+    for child in node.children:
+        if child.type in {"function_declarator", "pointer_declarator", "array_declarator", "init_declarator"}:
+            nested = _definition_name(child, source)
+            if nested:
+                return nested
     return None
 
 
@@ -391,6 +408,8 @@ def _complexity(node: Any) -> int:
 
 def _imports_from_node(node: Any, source: bytes, language: str) -> list[str]:
     text = _text(node, source).strip()
+    if language == "python":
+        return _python_imports(node, source)
     if language in {"javascript", "typescript"}:
         strings = _quoted_strings(text)
         return strings or _nonempty([text.removeprefix("import").strip()])
@@ -400,6 +419,25 @@ def _imports_from_node(node: Any, source: bytes, language: str) -> list[str]:
         return _nonempty([text.removeprefix("use").rstrip(";").strip()])
     if language == "java":
         return _nonempty([text.removeprefix("import").removeprefix("static").rstrip(";").strip()])
+    return []
+
+
+def _python_imports(node: Any, source: bytes) -> list[str]:
+    if node.type == "import_statement":
+        return [
+            _text(child, source).strip()
+            for child in node.children
+            if child.type in {"dotted_name", "aliased_import"}
+        ]
+    if node.type == "import_from_statement":
+        module = node.child_by_field_name("module_name")
+        prefix = _text(module, source).strip() if module is not None else ""
+        names: list[str] = []
+        for child in node.children:
+            if child.type in {"dotted_name", "aliased_import"} and child is not module:
+                name = _text(child, source).strip()
+                names.append(f"{prefix}.{name}".strip(".") if prefix else name)
+        return names or ([prefix] if prefix else [])
     return []
 
 

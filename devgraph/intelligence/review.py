@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from devgraph.config import DevGraphConfig
 from devgraph.core.graph_store import GraphStore
 from devgraph.core.schema import Node, ReviewResult
+from devgraph.intelligence.migration_risk import detect_migration_warnings
 from devgraph.intelligence.risk import risk_level, score_risk
 from devgraph.retrieval.context_packer import ContextPacker, ContextRequest
 from devgraph.update.diff_parser import DiffHunk, hunks_for_files, map_hunks_to_nodes
@@ -74,6 +76,7 @@ class ReviewEngine:
         config_or_infra_changes = self._config_or_infra_changes(files_to_review)
         database_or_schema_changes = self._database_or_schema_changes(files_to_review, changed_symbols)
         security_sensitive_changes = self._security_sensitive_changes(files_to_review, changed_symbols)
+        migration_warnings = detect_migration_warnings(files_to_review, changed_snippets)
         packer = ContextPacker(self.store)
         context = packer.pack(
             ContextRequest(
@@ -101,6 +104,7 @@ class ReviewEngine:
             config_or_infra_changes=config_or_infra_changes,
             database_or_schema_changes=database_or_schema_changes,
             security_sensitive_changes=security_sensitive_changes,
+            migration_warnings=migration_warnings,
             diff_summary=diff_summary,
             changed_snippets=changed_snippets,
             risk_score=score,
@@ -113,6 +117,7 @@ class ReviewEngine:
                 security_sensitive_changes,
                 impacted_files,
                 missing_tests,
+                migration_warnings,
             ),
             review_checklist=self._checklist(files_to_review, changed_symbols or changed_nodes),
             context_pack=context,
@@ -258,8 +263,14 @@ class ReviewEngine:
         security_sensitive_changes: list[str],
         impacted_files: list[str],
         missing_tests: list[str],
+        migration_warnings: list[dict[str, Any]] | None = None,
     ) -> list[str]:
         items: list[str] = []
+        if migration_warnings and any(w.get("severity") == "high" for w in migration_warnings):
+            high = [w["code"] for w in migration_warnings if w.get("severity") == "high"]
+            items.append(
+                f"High-risk migration ops detected ({', '.join(sorted(set(high)))}). Stage, backfill, and verify rollback before merging."
+            )
         if security_sensitive_changes:
             items.append("Review authentication, authorization, secret handling, and audit logging first.")
         if public_api_changes:
