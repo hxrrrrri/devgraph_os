@@ -182,6 +182,26 @@ MIGRATIONS: list[tuple[int, str]] = [
         CREATE INDEX IF NOT EXISTS idx_provenance_source_path ON provenance(source_path);
         """,
     ),
+    (
+        3,
+        """
+        CREATE TABLE IF NOT EXISTS embeddings (
+            entity_id TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            dimensions INTEGER NOT NULL,
+            vector TEXT NOT NULL,
+            text TEXT NOT NULL,
+            file_path TEXT,
+            metadata TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (entity_id, provider, model)
+        );
+        CREATE INDEX IF NOT EXISTS idx_embeddings_file_path ON embeddings(file_path);
+        CREATE INDEX IF NOT EXISTS idx_embeddings_entity_type ON embeddings(entity_type);
+        """,
+    ),
 ]
 
 

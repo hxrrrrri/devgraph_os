@@ -151,16 +151,24 @@ class GraphStatus(BaseModel):
 
 class ReviewResult(BaseModel):
     changed_files: list[str]
+    changed_hunks: list[dict[str, Any]] = Field(default_factory=list)
+    changed_symbols: list[Node] = Field(default_factory=list)
     changed_nodes: list[Node] = Field(default_factory=list)
     impacted_nodes: list[Node] = Field(default_factory=list)
     impacted_files: list[str] = Field(default_factory=list)
+    impacted_flows: list[dict[str, Any]] = Field(default_factory=list)
     affected_tests: list[str] = Field(default_factory=list)
     missing_tests: list[str] = Field(default_factory=list)
+    public_api_changes: list[str] = Field(default_factory=list)
+    config_or_infra_changes: list[str] = Field(default_factory=list)
+    database_or_schema_changes: list[str] = Field(default_factory=list)
+    security_sensitive_changes: list[str] = Field(default_factory=list)
     diff_summary: list[str] = Field(default_factory=list)
     changed_snippets: dict[str, str] = Field(default_factory=dict)
     risk_score: int
     risk_level: str
     risk_explanation: list[str]
+    prioritized_review_items: list[str] = Field(default_factory=list)
     review_checklist: list[str]
     context_pack: str
     suggested_commands: list[str]

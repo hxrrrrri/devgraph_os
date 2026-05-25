@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import typer
@@ -21,6 +22,8 @@ from devgraph.intelligence.handoff import HandoffEngine
 from devgraph.intelligence.onboard import OnboardingEngine
 from devgraph.intelligence.review import ReviewEngine, format_review_markdown
 from devgraph.logging import configure_logging
+from devgraph.retrieval.embeddings import index_existing_embeddings, index_extraction_embeddings
+from devgraph.retrieval.search import search_graph
 from devgraph.server.http_server import serve as serve_http
 from devgraph.server.mcp_server import run_mcp_server
 from devgraph.update.incremental import build_graph, update_graph
@@ -65,7 +68,10 @@ def build(force: bool = typer.Option(False, "--force", help="Re-index files even
     """Build the project graph."""
     root, config, store = _context()
     stats = build_graph(root, config, store, force=force)
-    typer.echo(f"Scanned {stats.scanned} files, indexed {stats.indexed}, skipped {stats.skipped}.")
+    typer.echo(
+        f"Scanned {stats.scanned} files, indexed {stats.indexed}, "
+        f"embeddings {stats.embeddings_indexed}, skipped {stats.skipped}."
+    )
     _print_warnings(stats.warnings)
 
 
@@ -79,7 +85,7 @@ def update(
     stats = update_graph(root, config, store, base=base, staged=staged)
     typer.echo(
         f"Scanned {stats.scanned} changed files, indexed {stats.indexed}, "
-        f"deleted {stats.deleted}, skipped {stats.skipped}."
+        f"embeddings {stats.embeddings_indexed}, deleted {stats.deleted}, skipped {stats.skipped}."
     )
     _print_warnings(stats.warnings)
 
@@ -119,6 +125,43 @@ def ask(question: str, budget: str = typer.Option("normal", "--budget")) -> None
     """Ask a graph-grounded project question."""
     _root, _config, store = _context()
     typer.echo(ExplainEngine(store).ask(question, budget=budget))
+
+
+@app.command("search")
+def search(
+    query: str,
+    limit: int = typer.Option(20, "--limit", "-n", help="Maximum results per search mode."),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+) -> None:
+    """Run hybrid FTS plus local embedding search."""
+    _root, config, store = _context()
+    payload = search_graph(store, query, limit=limit, config=config)
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2))
+        return
+    typer.echo("Nodes:")
+    for node in payload["nodes"][:limit]:
+        typer.echo(f"- {node['qualified_name']} ({node['type']})")
+    typer.echo("Semantic:")
+    for item in payload["semantic"][:limit]:
+        typer.echo(f"- {item['entity_id']} {item['score']:.2f} {item.get('file_path') or ''}")
+
+
+@app.command("embed")
+def embed(
+    force_local_hash: bool = typer.Option(
+        False,
+        "--local-hash",
+        help="Use DevGraph's zero-dependency local hash vectorizer for this run.",
+    )
+) -> None:
+    """Index local embeddings for nodes and chunks when explicitly requested."""
+    _root, config, store = _context()
+    count = index_existing_embeddings(store, config, force_local_hash=force_local_hash)
+    if count == 0 and not config.retrieval.embeddings_enabled and not force_local_hash:
+        typer.echo("Embeddings are disabled. Enable retrieval.embeddings_enabled or pass --local-hash.")
+        return
+    typer.echo(f"Indexed {count} embedding records.")
 
 
 @app.command("explain")
@@ -170,10 +213,18 @@ def review(
 
 
 @app.command("debug")
-def debug(issue: str, budget: str = typer.Option("normal", "--budget")) -> None:
+def debug(
+    issue: str,
+    budget: str = typer.Option("normal", "--budget"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+) -> None:
     """Create debug context from an error, stack trace, or symptom."""
     _root, _config, store = _context()
-    typer.echo(DebugEngine(store).debug(issue, budget=budget))
+    engine = DebugEngine(store)
+    if json_output:
+        typer.echo(json.dumps(engine.analyze(issue, budget=budget), indent=2))
+        return
+    typer.echo(engine.debug(issue, budget=budget))
 
 
 @app.command("onboard")
@@ -209,9 +260,20 @@ def ingest(target: Path) -> None:
         return
     from devgraph.extractors.registry import ExtractorRegistry
 
-    result = ExtractorRegistry(config).extract(root, (root / target).resolve() if not target.is_absolute() else target)
+    resolved = (root / target).resolve() if not target.is_absolute() else target.resolve()
+    try:
+        resolved.relative_to(root)
+        extraction_path = resolved
+    except ValueError:
+        imports_dir = root / config.storage.path / "imports"
+        imports_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = "".join(char if char.isalnum() or char in {".", "-", "_"} else "_" for char in resolved.name)
+        extraction_path = imports_dir / safe_name
+        shutil.copy2(resolved, extraction_path)
+    result = ExtractorRegistry(config).extract(root, extraction_path)
     store.replace_file_graph(result.file, result.nodes, result.edges, result.chunks)
-    typer.echo(f"Ingested {result.file.path}")
+    embeddings = index_extraction_embeddings(store, result, config)
+    typer.echo(f"Ingested {result.file.path}; embeddings {embeddings}.")
 
 
 @app.command("remember")
@@ -311,11 +373,16 @@ def doctor(json_output: bool = typer.Option(False, "--json", help="Emit machine-
     status_value = store.get_status(config.project.name)
     if status_value.total_nodes == 0:
         issues.append("Graph has no nodes. Run `devgraph build`.")
+    embedding_count = store.connection.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
     payload = {
         "project_root": str(root),
         "issues": issues,
         "status": status_value.model_dump(),
         "privacy": config.privacy.model_dump(),
+        "retrieval": {
+            **config.retrieval.model_dump(),
+            "indexed_embeddings": embedding_count,
+        },
     }
     if json_output:
         typer.echo(json.dumps(payload, indent=2))

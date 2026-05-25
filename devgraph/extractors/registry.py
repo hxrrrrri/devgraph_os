@@ -12,7 +12,7 @@ from devgraph.constants import (
 )
 from devgraph.core.schema import ExtractionResult
 from devgraph.extractors.base import BaseExtractor
-from devgraph.extractors.code.tree_sitter_parser import CodeExtractor
+from devgraph.extractors.code.parser import CodeExtractor
 from devgraph.extractors.config.env_parser import EnvExtractor
 from devgraph.extractors.config.json_parser import JsonExtractor
 from devgraph.extractors.config.toml_parser import TomlExtractor
@@ -37,6 +37,8 @@ def classify_file(path: Path) -> tuple[str, str | None]:
         return "infra", "terraform"
     if ".github" in path.parts and suffix in {".yml", ".yaml"}:
         return "infra", "github-actions"
+    if suffix in {".yml", ".yaml"} and any(part.lower() in {"k8s", "kubernetes", "manifests"} for part in path.parts):
+        return "infra", "kubernetes"
     if suffix in SUPPORTED_CODE_EXTENSIONS:
         return "code", SUPPORTED_CODE_EXTENSIONS[suffix]
     if suffix in SUPPORTED_DOC_EXTENSIONS:
@@ -75,4 +77,3 @@ class ExtractorRegistry:
         if language in self._by_language:
             return self._by_language[language].extract(root, path)
         return TextExtractor(self.config).extract(root, path)
-

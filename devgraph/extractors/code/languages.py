@@ -18,5 +18,15 @@ TREE_SITTER_LANGUAGE_NAMES = {
     "go": "go",
     "rust": "rust",
     "java": "java",
+    "c": "c",
+    "cpp": "cpp",
+    "csharp": "c_sharp",
+    "ruby": "ruby",
+    "php": "php",
+    "kotlin": "kotlin",
+    "swift": "swift",
+    "scala": "scala",
+    "dart": "dart",
+    "lua": "lua",
+    "bash": "bash",
 }
-

@@ -14,12 +14,11 @@ from pathlib import Path
 from typing import Literal, cast
 
 from devgraph.core.ids import edge_id, node_id, normalize_path
-from devgraph.core.schema import Edge, ExtractionResult, Node, NodeType
+from devgraph.core.schema import Edge, EdgeType, ExtractionResult, Node, NodeType
 from devgraph.extractors.base import (
     BaseExtractor,
     contains_edge,
     external_module_node,
-    make_chunk,
     make_file_node,
     make_file_record,
     read_text,
@@ -28,7 +27,10 @@ from devgraph.extractors.code.calls import parse_js_ts_calls
 from devgraph.extractors.code.imports import parse_js_ts_imports
 from devgraph.extractors.code.languages import language_for_path
 from devgraph.extractors.code.routes import parse_js_ts_routes
+from devgraph.extractors.code.sql import extract_table_references
 from devgraph.extractors.code.tests import is_test_symbol
+from devgraph.extractors.code.tree_sitter_adapter import TreeSitterSemanticAnalyzer
+from devgraph.retrieval.chunking import chunk_code, chunk_sql
 
 
 class CodeExtractor(BaseExtractor):
@@ -41,8 +43,29 @@ class CodeExtractor(BaseExtractor):
             nodes, edges, warnings = self._extract_python(record.path, text, file_node)
         elif language in {"javascript", "typescript"}:
             nodes, edges, warnings = self._extract_js_ts(record.path, text, file_node, language)
-        elif language in {"go", "rust", "java"}:
+        elif language == "sql":
+            nodes, edges, warnings = self._extract_sql(record.path, text, file_node)
+        elif language in {
+            "go",
+            "rust",
+            "java",
+            "c",
+            "cpp",
+            "csharp",
+            "ruby",
+            "php",
+            "kotlin",
+            "swift",
+            "scala",
+            "dart",
+            "lua",
+            "bash",
+        }:
             nodes, edges, warnings = self._extract_static_language(
+                record.path, text, file_node, language
+            )
+        elif language in {"vue", "svelte"}:
+            nodes, edges, warnings = self._extract_component_file(
                 record.path, text, file_node, language
             )
         else:
@@ -54,7 +77,7 @@ class CodeExtractor(BaseExtractor):
             file=record,
             nodes=all_nodes,
             edges=all_edges,
-            chunks=[make_chunk(record.path, text, "source", file_node)],
+            chunks=chunk_sql(record.path, text, file_node) if language == "sql" else chunk_code(record.path, text, all_nodes),
             warnings=warnings,
         )
 
@@ -197,6 +220,21 @@ class CodeExtractor(BaseExtractor):
         file_node: Node,
         language: str | None,
     ) -> tuple[list[Node], list[Edge], list[str]]:
+        semantic = TreeSitterSemanticAnalyzer().analyze(
+            file_path, text, file_node, language, Path(file_path)
+        )
+        if semantic.available and any(node.type != "module" for node in semantic.nodes):
+            return _with_js_ts_routes(
+                file_path,
+                text,
+                file_node,
+                language,
+                semantic.nodes,
+                semantic.edges,
+                semantic.warnings,
+                provenance="tree-sitter",
+            )
+
         module_name = normalize_path(file_path).replace("/", ".")
         module_node = Node(
             id=node_id("module", module_name),
@@ -234,7 +272,7 @@ class CodeExtractor(BaseExtractor):
                 qualified_name=qn,
                 file_path=file_path,
                 line_start=line,
-                line_end=line,
+                line_end=_symbol_end_line(text, line),
                 language=language,
                 content_hash=file_node.content_hash,
             )
@@ -270,33 +308,16 @@ class CodeExtractor(BaseExtractor):
                         metadata={"call": call_name},
                     )
                 )
-        for method, route, line in parse_js_ts_routes(text):
-            qn = f"{module_name}::{method} {route}"
-            route_node = Node(
-                id=node_id("api_endpoint", qn),
-                type="api_endpoint",
-                name=f"{method} {route}",
-                qualified_name=qn,
-                file_path=file_path,
-                line_start=line,
-                line_end=line,
-                language=language,
-                content_hash=file_node.content_hash,
-                metadata={"method": method, "path": route},
-            )
-            nodes.append(route_node)
-            edges.append(
-                Edge(
-                    id=edge_id(module_node.id, route_node.id, "routes_to", f"js-ts-parser:{method}:{route}"),
-                    source_id=module_node.id,
-                    target_id=route_node.id,
-                    type="routes_to",
-                    provenance_source="js-ts-parser",
-                    file_path=file_path,
-                    line=line,
-                )
-            )
-        return _dedupe_nodes(nodes), _dedupe_edges(edges), []
+        return _with_js_ts_routes(
+            file_path,
+            text,
+            file_node,
+            language,
+            nodes,
+            edges,
+            [],
+            provenance="js-ts-parser",
+        )
 
     def _extract_static_language(
         self,
@@ -305,6 +326,12 @@ class CodeExtractor(BaseExtractor):
         file_node: Node,
         language: str,
     ) -> tuple[list[Node], list[Edge], list[str]]:
+        semantic = TreeSitterSemanticAnalyzer().analyze(
+            file_path, text, file_node, language, Path(file_path)
+        )
+        if semantic.available and any(node.type != "module" for node in semantic.nodes):
+            return semantic.nodes, semantic.edges, semantic.warnings
+
         module_name = normalize_path(file_path).replace("/", ".")
         module_node = Node(
             id=node_id("module", module_name),
@@ -342,7 +369,7 @@ class CodeExtractor(BaseExtractor):
                 qualified_name=qn,
                 file_path=file_path,
                 line_start=line,
-                line_end=line,
+                line_end=_symbol_end_line(text, line),
                 language=language,
                 content_hash=file_node.content_hash,
                 metadata={"parser": f"{language}-patterns", "kind": kind},
@@ -379,6 +406,136 @@ class CodeExtractor(BaseExtractor):
                         metadata={"call": call_name},
                     )
                 )
+        return _dedupe_nodes(nodes), _dedupe_edges(edges), []
+
+    def _extract_sql(
+        self,
+        file_path: str,
+        text: str,
+        file_node: Node,
+    ) -> tuple[list[Node], list[Edge], list[str]]:
+        module_name = normalize_path(file_path).replace("/", ".")
+        module_node = Node(
+            id=node_id("module", module_name),
+            type="module",
+            name=Path(file_path).stem,
+            qualified_name=module_name,
+            file_path=file_path,
+            line_start=1,
+            line_end=max(1, text.count("\n") + 1),
+            language="sql",
+            content_hash=file_node.content_hash,
+            metadata={"parser": "sql-patterns"},
+        )
+        nodes: list[Node] = [module_node]
+        edges: list[Edge] = [
+            Edge(
+                id=edge_id(file_node.id, module_node.id, "contains", "sql-parser"),
+                source_id=file_node.id,
+                target_id=module_node.id,
+                type="contains",
+                provenance_source="sql-parser",
+                file_path=file_path,
+                line=1,
+            )
+        ]
+        for edge_type, table, line in extract_table_references(text):
+            qn = f"database::{table}"
+            table_node = Node(
+                id=node_id("database_table", qn),
+                type="database_table",
+                name=table,
+                qualified_name=qn,
+                file_path=file_path,
+                line_start=line,
+                line_end=line,
+                language="sql",
+                content_hash=file_node.content_hash,
+                metadata={"parser": "sql-patterns"},
+            )
+            nodes.append(table_node)
+            edges.append(
+                Edge(
+                    id=edge_id(module_node.id, table_node.id, edge_type, f"sql-parser:{table}:{line}"),
+                    source_id=module_node.id,
+                    target_id=table_node.id,
+                    type=cast(EdgeType, edge_type),
+                    provenance_source="sql-parser",
+                    file_path=file_path,
+                    line=line,
+                    metadata={"table": table},
+                )
+            )
+        return _dedupe_nodes(nodes), _dedupe_edges(edges), []
+
+    def _extract_component_file(
+        self,
+        file_path: str,
+        text: str,
+        file_node: Node,
+        language: str,
+    ) -> tuple[list[Node], list[Edge], list[str]]:
+        module_name = normalize_path(file_path).replace("/", ".")
+        module_node = Node(
+            id=node_id("module", module_name),
+            type="module",
+            name=Path(file_path).stem,
+            qualified_name=module_name,
+            file_path=file_path,
+            line_start=1,
+            line_end=max(1, text.count("\n") + 1),
+            language=language,
+            content_hash=file_node.content_hash,
+            confidence_tier="extracted",
+            metadata={"parser": f"{language}-component"},
+        )
+        component_node = Node(
+            id=node_id("class", f"{module_name}::{Path(file_path).stem}"),
+            type="class",
+            name=Path(file_path).stem,
+            qualified_name=f"{module_name}::{Path(file_path).stem}",
+            file_path=file_path,
+            line_start=1,
+            line_end=max(1, text.count("\n") + 1),
+            language=language,
+            content_hash=file_node.content_hash,
+            metadata={"kind": "component", "parser": f"{language}-component"},
+        )
+        nodes: list[Node] = [module_node, component_node]
+        edges: list[Edge] = [
+            Edge(
+                id=edge_id(file_node.id, module_node.id, "contains", f"{language}-component"),
+                source_id=file_node.id,
+                target_id=module_node.id,
+                type="contains",
+                provenance_source=f"{language}-component",
+                file_path=file_path,
+                line=1,
+            ),
+            Edge(
+                id=edge_id(module_node.id, component_node.id, "contains", f"{language}-component"),
+                source_id=module_node.id,
+                target_id=component_node.id,
+                type="contains",
+                provenance_source=f"{language}-component",
+                file_path=file_path,
+                line=1,
+            ),
+        ]
+        for module, line in parse_js_ts_imports(text):
+            target = external_module_node(module, language)
+            nodes.append(target)
+            edges.append(
+                Edge(
+                    id=edge_id(module_node.id, target.id, "imports", f"{language}-component:{module}"),
+                    source_id=module_node.id,
+                    target_id=target.id,
+                    type="imports",
+                    provenance_source=f"{language}-component",
+                    file_path=file_path,
+                    line=line,
+                )
+            )
         return _dedupe_nodes(nodes), _dedupe_edges(edges), []
 
     def _extract_generic_code(
@@ -462,6 +619,46 @@ def _containing_function_node(
     return next((node for node in symbols.values() if node.qualified_name == qn_name), symbols.get(best.name))
 
 
+def _with_js_ts_routes(
+    file_path: str,
+    text: str,
+    file_node: Node,
+    language: str | None,
+    nodes: list[Node],
+    edges: list[Edge],
+    warnings: list[str],
+    provenance: str,
+) -> tuple[list[Node], list[Edge], list[str]]:
+    module_node = next((node for node in nodes if node.type == "module"), file_node)
+    for method, route, line in parse_js_ts_routes(text):
+        qn = f"{module_node.qualified_name}::{method} {route}"
+        route_node = Node(
+            id=node_id("api_endpoint", qn),
+            type="api_endpoint",
+            name=f"{method} {route}",
+            qualified_name=qn,
+            file_path=file_path,
+            line_start=line,
+            line_end=line,
+            language=language,
+            content_hash=file_node.content_hash,
+            metadata={"method": method, "path": route, "parser": provenance},
+        )
+        nodes.append(route_node)
+        edges.append(
+            Edge(
+                id=edge_id(module_node.id, route_node.id, "routes_to", f"{provenance}:{method}:{route}"),
+                source_id=module_node.id,
+                target_id=route_node.id,
+                type="routes_to",
+                provenance_source=provenance,
+                file_path=file_path,
+                line=line,
+            )
+        )
+    return _dedupe_nodes(nodes), _dedupe_edges(edges), warnings
+
+
 def _js_ts_symbols(text: str) -> list[tuple[str, str, int]]:
     patterns = [
         (re.compile(r"\bclass\s+([A-Za-z_$][\w$]*)"), "class"),
@@ -515,6 +712,77 @@ def _language_symbols(text: str, language: str) -> list[tuple[str, str, int]]:
                 "function",
             ),
         ]
+    elif language in {"c", "cpp"}:
+        patterns = [
+            (re.compile(r"\b(?:class|struct|enum)\s+([A-Za-z_]\w*)"), "class"),
+            (
+                re.compile(
+                    r"^\s*(?:static\s+|inline\s+|extern\s+|virtual\s+|constexpr\s+)*"
+                    r"[A-Za-z_][\w:<>,~*&\s]+\s+([A-Za-z_]\w*)\s*\([^;]*\)\s*\{",
+                    re.MULTILINE,
+                ),
+                "function",
+            ),
+        ]
+    elif language == "csharp":
+        patterns = [
+            (re.compile(r"\b(?:class|interface|struct|enum|record)\s+([A-Za-z_]\w*)"), "class"),
+            (
+                re.compile(
+                    r"^\s*(?:public|private|protected|internal|static|async|virtual|override|sealed|partial|\s)+"
+                    r"[\w<>\[\], ?]+\s+([A-Za-z_]\w*)\s*\(",
+                    re.MULTILINE,
+                ),
+                "function",
+            ),
+        ]
+    elif language == "ruby":
+        patterns = [
+            (re.compile(r"^\s*class\s+([A-Za-z_:]\w*)", re.MULTILINE), "class"),
+            (re.compile(r"^\s*module\s+([A-Za-z_:]\w*)", re.MULTILINE), "type"),
+            (re.compile(r"^\s*def\s+(?:self\.)?([A-Za-z_]\w*[!?=]?)", re.MULTILINE), "function"),
+        ]
+    elif language == "php":
+        patterns = [
+            (re.compile(r"\b(?:class|interface|trait|enum)\s+([A-Za-z_]\w*)"), "class"),
+            (re.compile(r"\bfunction\s+([A-Za-z_]\w*)\s*\("), "function"),
+        ]
+    elif language == "kotlin":
+        patterns = [
+            (re.compile(r"\b(?:class|interface|object|data\s+class|enum\s+class)\s+([A-Za-z_]\w*)"), "class"),
+            (re.compile(r"^\s*(?:public|private|protected|internal|suspend|inline|\s)*fun\s+([A-Za-z_]\w*)\s*[<(]", re.MULTILINE), "function"),
+        ]
+    elif language == "swift":
+        patterns = [
+            (re.compile(r"\b(?:class|struct|enum|protocol|actor)\s+([A-Za-z_]\w*)"), "class"),
+            (re.compile(r"^\s*(?:public|private|internal|fileprivate|open|static|class|\s)*func\s+([A-Za-z_]\w*)\s*\(", re.MULTILINE), "function"),
+        ]
+    elif language == "scala":
+        patterns = [
+            (re.compile(r"\b(?:class|object|trait|enum)\s+([A-Za-z_]\w*)"), "class"),
+            (re.compile(r"^\s*(?:private|protected|override|implicit|inline|\s)*def\s+([A-Za-z_]\w*)\s*[(:=]", re.MULTILINE), "function"),
+        ]
+    elif language == "dart":
+        patterns = [
+            (re.compile(r"\b(?:class|mixin|enum|extension)\s+([A-Za-z_]\w*)"), "class"),
+            (
+                re.compile(
+                    r"^\s*(?:static\s+|async\s+)?(?:[A-Za-z_][\w<>?]*\s+)?([A-Za-z_]\w*)\s*\([^;]*\)\s*(?:async\s*)?\{",
+                    re.MULTILINE,
+                ),
+                "function",
+            ),
+        ]
+    elif language == "lua":
+        patterns = [
+            (re.compile(r"^\s*(?:local\s+)?function\s+([A-Za-z_][\w.:]*)\s*\(", re.MULTILINE), "function"),
+            (re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*function\s*\(", re.MULTILINE), "function"),
+        ]
+    elif language == "bash":
+        patterns = [
+            (re.compile(r"^\s*(?:function\s+)?([A-Za-z_][\w-]*)\s*(?:\(\))\s*\{", re.MULTILINE), "function"),
+            (re.compile(r"^\s*function\s+([A-Za-z_][\w-]*)\s*\{", re.MULTILINE), "function"),
+        ]
     else:
         return []
 
@@ -548,12 +816,51 @@ def _language_imports(text: str, language: str) -> list[tuple[str, int]]:
     elif language == "java":
         for match in re.finditer(r"^\s*import\s+(?:static\s+)?([^;]+);", text, re.MULTILINE):
             imports.append((match.group(1).strip(), _line_for_offset(offsets, match.start())))
+    elif language in {"c", "cpp"}:
+        for match in re.finditer(r"^\s*#\s*include\s+[<\"]([^>\"]+)[>\"]", text, re.MULTILINE):
+            imports.append((match.group(1).strip(), _line_for_offset(offsets, match.start())))
+    elif language == "csharp":
+        for match in re.finditer(r"^\s*using\s+([^;]+);", text, re.MULTILINE):
+            imports.append((match.group(1).strip(), _line_for_offset(offsets, match.start())))
+    elif language in {"ruby", "lua"}:
+        for match in re.finditer(r"^\s*(?:require|require_relative)\s+['\"]([^'\"]+)['\"]", text, re.MULTILINE):
+            imports.append((match.group(1).strip(), _line_for_offset(offsets, match.start())))
+    elif language == "php":
+        for match in re.finditer(r"^\s*(?:use|include|require(?:_once)?)\s+([^;]+);", text, re.MULTILINE):
+            imports.append((match.group(1).strip().strip("'\""), _line_for_offset(offsets, match.start())))
+    elif language in {"kotlin", "swift", "scala", "dart"}:
+        for match in re.finditer(r"^\s*import\s+([^;\n]+)", text, re.MULTILINE):
+            imports.append((match.group(1).strip(), _line_for_offset(offsets, match.start())))
+    elif language == "bash":
+        for match in re.finditer(r"^\s*(?:source|\.)\s+(.+)$", text, re.MULTILINE):
+            imports.append((match.group(1).strip(), _line_for_offset(offsets, match.start())))
     return imports
 
 
 def _nearest_symbol(nodes: Iterable[Node], line: int) -> Node | None:
     before = [node for node in nodes if (node.line_start or 0) <= line]
     return max(before, key=lambda node: node.line_start or 0) if before else None
+
+
+def _symbol_end_line(text: str, start_line: int) -> int:
+    lines = text.splitlines()
+    if not lines:
+        return start_line
+    brace_balance = 0
+    saw_brace = False
+    indent = len(lines[start_line - 1]) - len(lines[start_line - 1].lstrip()) if start_line <= len(lines) else 0
+    for index in range(start_line, len(lines) + 1):
+        line = lines[index - 1]
+        brace_balance += line.count("{") - line.count("}")
+        saw_brace = saw_brace or "{" in line
+        if saw_brace and brace_balance <= 0 and index > start_line:
+            return index
+        if not saw_brace and index > start_line:
+            stripped = line.strip()
+            current_indent = len(line) - len(line.lstrip())
+            if stripped and current_indent <= indent and not stripped.startswith(("@", "#", "//")):
+                return index - 1
+    return min(len(lines), start_line + 80)
 
 
 def _line_offsets(text: str) -> list[int]:

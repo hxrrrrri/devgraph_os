@@ -1,20 +1,13 @@
 # VS Code Extension
 
-The extension lives in `apps/vscode-extension`.
+The extension in `apps/vscode-extension` shells out to the configured DevGraph binary.
 
-It contributes:
+Settings:
 
-- DevGraph: Initialize Project
-- DevGraph: Build Graph
-- DevGraph: Update Graph
-- DevGraph: Review Current Changes
-- DevGraph: Explain Current File
-- DevGraph: Explain Symbol
-- DevGraph: Ask About Project
-- DevGraph: Run Doctor
-- DevGraph: Remember Decision
-- DevGraph: Show Memories
-- DevGraph: Open Dashboard
-- DevGraph: Generate Handoff
+- `devgraph.binaryPath`
+- `devgraph.autoRefresh`
+- `devgraph.dashboardPort`
 
-The extension calls the local `devgraph` CLI with child processes. This keeps the extension local-first and avoids a second backend. The sidebar displays graph status from `devgraph status --json` and exposes quick actions for diagnostics and memories.
+Commands include initialize, build, update, review changes, explain current file, explain selection, ask, search graph, trace flow, open dashboard, copy handoff prompt, open review report, and open onboarding guide.
+
+The sidebar summarizes graph status, changed files, impacted files, risk, sessions, memories, and quick actions.

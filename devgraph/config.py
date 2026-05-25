@@ -50,6 +50,13 @@ class DashboardConfig(BaseModel):
     port: int = DEFAULT_DASHBOARD_PORT
 
 
+class RetrievalConfig(BaseModel):
+    embeddings_enabled: bool = False
+    embedding_provider: str = "disabled"
+    embedding_dimensions: int = 384
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+
+
 class DevGraphConfig(BaseModel):
     project: ProjectConfig = Field(default_factory=ProjectConfig)
     indexing: IndexingConfig = Field(default_factory=IndexingConfig)
@@ -57,6 +64,7 @@ class DevGraphConfig(BaseModel):
     review: ReviewConfig = Field(default_factory=ReviewConfig)
     privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
+    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
 
     @property
     def storage_path(self) -> Path:
@@ -85,6 +93,12 @@ allow_llm_enrichment = false
 
 [dashboard]
 port = 38987
+
+[retrieval]
+embeddings_enabled = false
+embedding_provider = "disabled"
+embedding_dimensions = 384
+embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
 """
 
 
@@ -132,7 +146,7 @@ def ensure_project(project_root: Path, platform: str | None = None) -> list[Path
         ignore_path.write_text(DEFAULT_IGNORE_TEXT, encoding="utf-8")
         created.append(ignore_path)
     storage_path = project_root / DEFAULT_STORAGE_DIR
-    for child in ["cache", "snapshots", "reports", "wiki", "sessions", "exports"]:
+    for child in ["cache", "snapshots", "reports", "wiki", "sessions", "exports", "imports"]:
         path = storage_path / child
         path.mkdir(parents=True, exist_ok=True)
     if platform:

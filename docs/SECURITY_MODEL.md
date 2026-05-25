@@ -1,15 +1,14 @@
 # Security Model
 
-DevGraph OS defaults to local-only processing.
+DevGraph OS is local-first.
 
-- No telemetry.
-- No analytics.
-- No cloud calls by default.
-- Local SQLite storage under `.devgraph/`.
-- `.env` values are redacted and only variable names are stored.
-- Likely secret values in docs/config chunks are redacted.
-- LLM enrichment is opt-in through `devgraph.toml`.
-- `devgraph doctor` reports privacy-sensitive settings.
+- No telemetry or analytics.
+- HTTP binds to `127.0.0.1`.
+- Cloud calls are disabled by default.
+- Embeddings are disabled by default.
+- `.env`, JSON, YAML, TOML, Markdown, text, config, infra, and code chunks redact likely secret values.
+- Secret hints include `api_key`, `token`, `secret`, `password`, `private_key`, `access_key`, and `refresh_token`.
+- External ingested files are copied under `.devgraph/imports/` before extraction.
+- Dashboard file-context endpoints reject path traversal.
 
-Before any future external model integration sends code or docs outside the machine, the integration must display a clear warning and require explicit user action.
-
+Optional local dependencies such as Tree-sitter grammars, PDF/DOCX parsers, MCP, or sentence-transformers fail gracefully when not installed.

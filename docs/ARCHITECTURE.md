@@ -1,36 +1,10 @@
 # Architecture
 
-DevGraph OS is a local-first developer intelligence layer. The first implementation is intentionally modular:
+DevGraph OS has four layers.
 
-1. Extractors detect and parse files into canonical nodes, edges, chunks, and provenance.
-2. The graph store persists data in SQLite with WAL mode and FTS5 indexes.
-3. Retrieval and intelligence modules build review, debug, explain, onboarding, and handoff context.
-4. Interfaces expose the same engine through CLI, MCP, HTTP, dashboard, VS Code, and slash-command instructions.
+1. Extractors parse code, docs, configs, infra, SQL, and imported documents into nodes, edges, chunks, confidence tiers, and provenance.
+2. The SQLite graph store persists files, nodes, edges, chunks, FTS indexes, changes, memories, sessions, snapshots, provenance, and optional embeddings.
+3. Intelligence modules provide review, debug, explain, onboarding, handoff, flows, communities, ranking, and context packing.
+4. Interfaces expose the engine through CLI, MCP, HTTP/dashboard, VS Code, exports, and wiki generation.
 
-The product boundary is the canonical graph schema. Parser facts are marked `extracted`; indirect deterministic relations are `inferred`; model-generated data must be `llm`; uncertain facts are `ambiguous`; manually approved facts are `user`.
-
-## Storage
-
-Default storage:
-
-```txt
-.devgraph/
-  graph.db
-  embeddings.db
-  cache/
-  snapshots/
-  reports/
-  wiki/
-  sessions/
-  exports/
-```
-
-Neo4j is not required. It is available only as an export format.
-
-## Current parser boundary
-
-Python extraction uses the standard-library AST. JavaScript and TypeScript use conservative pattern extraction for imports, symbols, calls, and common route declarations. Go, Rust, and Java now have deterministic symbol/import extraction, but deeper semantic analysis still belongs behind the Tree-sitter adapter boundary and remains optional/local. PDF and Office extraction use optional local dependencies and never write extracted temporary text beside source documents.
-
-## Local intelligence
-
-Builds and updates record provenance rows for extracted nodes, edges, and chunks. Incremental updates record changed-file metadata, mark deleted files, refresh inferred `tested_by` edges from naming conventions, and write a latest JSON snapshot. Memories are explicit user-approved records stored locally; secret-looking values are redacted before persistence.
+Tree-sitter is optional. Python uses standard-library AST. If a grammar is unavailable or extraction is uncertain, facts are conservative and marked `ambiguous` or `inferred`.

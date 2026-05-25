@@ -9,12 +9,12 @@ from devgraph.core.schema import ExtractionResult, Node
 from devgraph.extractors.base import (
     BaseExtractor,
     contains_edge,
-    make_chunk,
     make_file_node,
     make_file_record,
     read_text,
     redact_secrets,
 )
+from devgraph.retrieval.chunking import chunk_text
 
 
 class TextExtractor(BaseExtractor):
@@ -48,6 +48,6 @@ class TextExtractor(BaseExtractor):
             file=record,
             nodes=[file_node, document],
             edges=[contains_edge(file_node, document, language)],
-            chunks=[make_chunk(record.path, safe_text, "document", document)],
+            chunks=chunk_text(record.path, safe_text, document, "document"),
             warnings=warnings or [],
         )

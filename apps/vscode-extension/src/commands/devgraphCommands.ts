@@ -11,11 +11,16 @@ export function registerDevGraphCommands(context: vscode.ExtensionContext, refre
     vscode.commands.registerCommand("devgraph.explainCurrentFile", () => explainCurrentFile()),
     vscode.commands.registerCommand("devgraph.explainSelection", () => explainSelection()),
     vscode.commands.registerCommand("devgraph.ask", () => askProject()),
+    vscode.commands.registerCommand("devgraph.searchGraph", () => searchGraph()),
+    vscode.commands.registerCommand("devgraph.traceFlow", () => traceFlowFromSelection()),
     vscode.commands.registerCommand("devgraph.doctor", () => runAndShow(["doctor", "--json"], refresh)),
     vscode.commands.registerCommand("devgraph.rememberDecision", () => rememberDecision(refresh)),
     vscode.commands.registerCommand("devgraph.showMemories", () => runAndShow(["memories"], refresh)),
     vscode.commands.registerCommand("devgraph.openDashboard", () => openDashboard()),
-    vscode.commands.registerCommand("devgraph.handoff", () => runAndShow(["handoff"], refresh))
+    vscode.commands.registerCommand("devgraph.handoff", () => runAndShow(["handoff"], refresh)),
+    vscode.commands.registerCommand("devgraph.copyHandoffPrompt", () => copyHandoffPrompt(refresh)),
+    vscode.commands.registerCommand("devgraph.openReviewReport", () => openGeneratedReport(".devgraph/reports/review.md", ["review"], refresh)),
+    vscode.commands.registerCommand("devgraph.openOnboardingGuide", () => openGeneratedReport(".devgraph/reports/onboarding.md", ["onboard"], refresh))
   );
 }
 
@@ -44,10 +49,53 @@ async function askProject(): Promise<void> {
   await runAndShow(["ask", question]);
 }
 
+async function searchGraph(): Promise<void> {
+  const query = await vscode.window.showInputBox({ prompt: "Search DevGraph" });
+  if (!query) return;
+  await runAndShow(["search", query, "--json"]);
+}
+
+async function traceFlowFromSelection(): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  const selection = editor?.document.getText(editor.selection).trim();
+  const query = selection || editor?.document.fileName;
+  if (!query) {
+    vscode.window.showWarningMessage("Select a symbol or open a file to trace with DevGraph.");
+    return;
+  }
+  await runAndShow(["trace", query]);
+}
+
 async function rememberDecision(refresh: () => void): Promise<void> {
   const decision = await vscode.window.showInputBox({ prompt: "Remember a DevGraph decision" });
   if (!decision) return;
   await runAndShow(["remember", "--kind", "decision", decision], refresh);
+}
+
+async function copyHandoffPrompt(refresh: () => void): Promise<void> {
+  await runDevGraph(["handoff"]);
+  refresh();
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+  if (!root) return;
+  const uri = vscode.Uri.joinPath(root, ".devgraph", "sessions", "handoff.json");
+  try {
+    const bytes = await vscode.workspace.fs.readFile(uri);
+    const payload = JSON.parse(Buffer.from(bytes).toString("utf8")) as { continue_prompt?: string };
+    await vscode.env.clipboard.writeText(payload.continue_prompt ?? "");
+    vscode.window.showInformationMessage("DevGraph handoff prompt copied.");
+  } catch {
+    vscode.window.showWarningMessage("DevGraph handoff prompt was not available.");
+  }
+}
+
+async function openGeneratedReport(path: string, command: string[], refresh: () => void): Promise<void> {
+  await runDevGraph(command);
+  refresh();
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+  if (!root) return;
+  const uri = vscode.Uri.joinPath(root, ...path.split("/"));
+  const doc = await vscode.workspace.openTextDocument(uri);
+  await vscode.window.showTextDocument(doc, { preview: true });
 }
 
 async function runAndShow(args: string[], refresh?: () => void): Promise<void> {
@@ -56,7 +104,9 @@ async function runAndShow(args: string[], refresh?: () => void): Promise<void> {
       { location: vscode.ProgressLocation.Notification, title: `devgraph ${args.join(" ")}` },
       () => runDevGraph(args)
     );
-    refresh?.();
+    if (vscode.workspace.getConfiguration("devgraph").get<boolean>("autoRefresh", true)) {
+      refresh?.();
+    }
     const doc = await vscode.workspace.openTextDocument({ content: output, language: "markdown" });
     await vscode.window.showTextDocument(doc, { preview: true });
   } catch (err) {

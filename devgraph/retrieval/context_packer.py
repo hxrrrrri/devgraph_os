@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from devgraph.core.graph_store import GraphStore
-from devgraph.core.schema import Node
+from devgraph.core.schema import Chunk, Node
+from devgraph.retrieval.embeddings import semantic_search
 from devgraph.retrieval.ranking import rank_nodes
 from devgraph.retrieval.token_budget import budget_tokens, trim_to_budget
 
@@ -32,7 +33,18 @@ class ContextPacker:
         related_nodes = [Node(**node) for node in neighborhood["nodes"]]
         deduped_nodes = {node.id: node for node in [*seeds, *related_nodes]}
         ranked_nodes = rank_nodes(list(deduped_nodes.values()), request.query)
+        semantic_matches = semantic_search(self.store, request.query, limit=8)
         relevant_files = sorted({node.file_path for node in ranked_nodes if node.file_path})
+        relevant_files = sorted(
+            {
+                *relevant_files,
+                *(
+                    str(match["file_path"])
+                    for match in semantic_matches
+                    if match.get("file_path")
+                ),
+            }
+        )
         chunks = []
         if request.include_source:
             for file_path in relevant_files[:8]:
@@ -44,16 +56,19 @@ class ContextPacker:
             "## Task",
             request.task_type,
             "",
-            "## Summary",
+            "## Intent",
+            self._intent(request),
+            "",
+            "## Direct answer basis",
             self._summary(request, ranked_nodes, relevant_files),
             "",
-            "## High-confidence facts",
+            "## High-confidence parser facts",
             *self._facts(ranked_nodes),
             "",
-            "## Relevant files",
-            *[f"- `{path}`" for path in relevant_files[:20]],
+            "## Changed files and symbols",
+            *self._changed_area(request, ranked_nodes),
             "",
-            "## Relevant symbols",
+            "## Impacted graph area",
             *[
                 f"- `{node.qualified_name}` ({node.type}, {node.confidence_tier})"
                 for node in ranked_nodes[:30]
@@ -65,37 +80,31 @@ class ContextPacker:
             "## Changed code snippets",
             *self._diff_snippets(request.diff_snippets),
             "",
-            "## Tests",
+            "## Relevant source excerpts",
+            *self._source_excerpts(chunks[:8]),
+            "",
+            "## Relevant tests",
             *self._tests(ranked_nodes),
             "",
-            "## Project memories",
+            "## Relevant docs/config/infra",
+            *[
+                f"- `{node.qualified_name}` ({node.type}, {node.confidence_tier})"
+                for node in ranked_nodes
+                if node.type in {"document", "section", "config", "resource", "pipeline"}
+            ][:20],
+            "",
+            "## Memories / decisions",
             *self._memories(memories),
             "",
-            "## Docs/configs",
-            *[
-                f"- `{node.qualified_name}` ({node.type})"
-                for node in ranked_nodes
-                if node.type in {"document", "section", "config"}
-            ][:20],
+            "## Semantic matches",
+            *self._semantic_matches(semantic_matches),
             "",
             "## Risks / uncertainty",
             *self._uncertainty(ranked_nodes),
             "",
-            "## Suggested next actions",
+            "## Recommended next actions",
             *self._actions(request),
         ]
-        if chunks:
-            lines.extend(["", "## Source excerpts"])
-            for chunk in chunks[:8]:
-                line_range = f"{chunk.line_start or 1}-{chunk.line_end or '?'}"
-                lines.extend(
-                    [
-                        f"### `{chunk.file_path}` lines {line_range}",
-                        "```",
-                        chunk.content[:2500],
-                        "```",
-                    ]
-                )
         return trim_to_budget("\n".join(lines), budget_tokens(request.token_budget))
 
     def _seed_nodes(self, request: ContextRequest) -> list[Node]:
@@ -108,8 +117,28 @@ class ContextPacker:
             nodes.extend(self.store.nodes_for_files(request.seed_files))
         if request.query:
             nodes.extend(self.store.find_nodes(request.query, limit=12))
+            semantic_nodes = semantic_search(
+                self.store, request.query, limit=8, entity_types=["node"]
+            )
+            for match in semantic_nodes:
+                node = self.store.get_node(str(match["entity_id"]))
+                if node:
+                    nodes.append(node)
         deduped: dict[str, Node] = {node.id: node for node in nodes}
         return list(deduped.values())
+
+    @staticmethod
+    def _intent(request: ContextRequest) -> str:
+        intents = {
+            "review": "Assess changed files, impacted symbols, risk signals, and test coverage gaps.",
+            "debug": "Map symptoms or stack frames to likely entry points, callers, callees, tests, and configs.",
+            "explain": "Explain the requested file, symbol, or subsystem from parser facts and graph context.",
+            "ask": "Answer a project question using graph facts, chunks, docs, configs, and memories.",
+            "onboard": "Prioritize read-first files, major symbols, architecture layers, and glossary terms.",
+            "refactor": "Identify dependent symbols, callers, tests, and risk before changing structure.",
+            "handoff": "Preserve current project status, decisions, changed areas, and next-agent instructions.",
+        }
+        return intents.get(request.task_type, "Provide graph-grounded context for the requested task.")
 
     @staticmethod
     def _summary(request: ContextRequest, nodes: list[Node], files: list[str]) -> str:
@@ -121,6 +150,17 @@ class ContextPacker:
         )
 
     @staticmethod
+    def _changed_area(request: ContextRequest, nodes: list[Node]) -> list[str]:
+        lines = [f"- File: `{path}`" for path in request.seed_files[:20]]
+        if request.seed_nodes:
+            seeded = [node for node in nodes if node.id in set(request.seed_nodes)]
+            lines.extend(
+                f"- Symbol: `{node.qualified_name}` ({node.type}, lines {node.line_start}-{node.line_end})"
+                for node in seeded[:20]
+            )
+        return lines or ["- No changed files or explicit seed symbols were provided."]
+
+    @staticmethod
     def _facts(nodes: list[Node]) -> list[str]:
         facts = [
             f"- `{node.qualified_name}` is a `{node.type}` from `{node.file_path}`."
@@ -129,13 +169,17 @@ class ContextPacker:
         ]
         return facts[:20] or ["- No high-confidence parser facts matched the request."]
 
-    @staticmethod
-    def _graph_edges(edges: list[dict[str, object]]) -> list[str]:
-        lines = [
-            f"- `{edge['source_id']}` --{edge['type']}--> `{edge['target_id']}` "
-            f"(source: `{edge.get('provenance_source', 'unknown')}`)"
-            for edge in edges[:20]
-        ]
+    def _graph_edges(self, edges: list[dict[str, object]]) -> list[str]:
+        lines = []
+        for edge in edges[:20]:
+            source = self.store.get_node(str(edge["source_id"]))
+            target = self.store.get_node(str(edge["target_id"]))
+            if source is None or target is None:
+                continue
+            lines.append(
+                f"- `{_display_node(source)}` --{edge['type']}--> `{_display_node(target)}` "
+                f"(source: `{edge.get('provenance_source', 'unknown')}`)"
+            )
         return lines or ["- No graph paths found for the current seed nodes."]
 
     @staticmethod
@@ -148,6 +192,23 @@ class ContextPacker:
         return lines
 
     @staticmethod
+    def _source_excerpts(chunks: list[Chunk]) -> list[str]:
+        if not chunks:
+            return ["- No focused source chunks were selected."]
+        lines: list[str] = []
+        for chunk in chunks:
+            line_range = f"{chunk.line_start or 1}-{chunk.line_end or '?'}"
+            lines.extend(
+                [
+                    f"### `{chunk.file_path}` lines {line_range} ({chunk.kind})",
+                    "```",
+                    chunk.content[:2500],
+                    "```",
+                ]
+            )
+        return lines
+
+    @staticmethod
     def _memories(memories: list[dict[str, object]]) -> list[str]:
         if not memories:
             return ["- No user-approved project memories matched this request."]
@@ -155,6 +216,19 @@ class ContextPacker:
         for memory in memories:
             lines.append(
                 f"- `{memory['id']}` ({memory['kind']}): {str(memory['content'])[:240]}"
+            )
+        return lines
+
+    @staticmethod
+    def _semantic_matches(matches: list[dict[str, object]]) -> list[str]:
+        if not matches:
+            return ["- No local embedding matches were available."]
+        lines = []
+        for match in matches:
+            score = float(str(match["score"]))
+            file_path = match.get("file_path") or "graph"
+            lines.append(
+                f"- `{match['entity_id']}` ({match['entity_type']}, {score:.2f}) from `{file_path}`"
             )
         return lines
 
@@ -180,4 +254,12 @@ class ContextPacker:
             return ["- Start from suspected entry points.", "- Check callers, configs, and recent changes."]
         if request.task_type == "onboard":
             return ["- Read the listed files first.", "- Ask DevGraph follow-up questions by subsystem."]
+        if request.task_type == "handoff":
+            return ["- Start with `devgraph status --json`.", "- Run `devgraph review --json` before editing."]
         return ["- Use `devgraph explain <symbol-or-file>` for a narrower context pack."]
+
+
+def _display_node(node: Node) -> str:
+    if node.file_path and node.line_start:
+        return f"{node.qualified_name}"
+    return node.qualified_name

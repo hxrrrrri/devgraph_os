@@ -14,6 +14,26 @@ SUPPORTED_CODE_EXTENSIONS = {
     ".go": "go",
     ".rs": "rust",
     ".java": "java",
+    ".c": "c",
+    ".h": "c",
+    ".cc": "cpp",
+    ".cpp": "cpp",
+    ".cxx": "cpp",
+    ".hpp": "cpp",
+    ".cs": "csharp",
+    ".rb": "ruby",
+    ".php": "php",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
+    ".swift": "swift",
+    ".scala": "scala",
+    ".dart": "dart",
+    ".lua": "lua",
+    ".sh": "bash",
+    ".bash": "bash",
+    ".sql": "sql",
+    ".vue": "vue",
+    ".svelte": "svelte",
 }
 
 SUPPORTED_DOC_EXTENSIONS = {
@@ -54,5 +74,6 @@ SECRET_KEY_HINTS = (
     "passwd",
     "credential",
     "private_key",
+    "access_key",
+    "refresh_token",
 )
-

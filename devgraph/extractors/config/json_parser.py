@@ -10,12 +10,12 @@ from devgraph.core.schema import ExtractionResult, Node
 from devgraph.extractors.base import (
     BaseExtractor,
     contains_edge,
-    make_chunk,
     make_file_node,
     make_file_record,
     read_text,
     redact_secrets,
 )
+from devgraph.retrieval.chunking import chunk_config
 
 
 class JsonExtractor(BaseExtractor):
@@ -47,5 +47,5 @@ class JsonExtractor(BaseExtractor):
             file=record,
             nodes=[file_node, config],
             edges=[contains_edge(file_node, config, "json")],
-            chunks=[make_chunk(record.path, text, "config", config)],
+            chunks=chunk_config(record.path, text, config),
         )

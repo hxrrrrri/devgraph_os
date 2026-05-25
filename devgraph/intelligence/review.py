@@ -11,7 +11,8 @@ from devgraph.core.graph_store import GraphStore
 from devgraph.core.schema import Node, ReviewResult
 from devgraph.intelligence.risk import risk_level, score_risk
 from devgraph.retrieval.context_packer import ContextPacker, ContextRequest
-from devgraph.update.git import changed_files, diff_patch
+from devgraph.update.diff_parser import DiffHunk, hunks_for_files, map_hunks_to_nodes
+from devgraph.update.git import changed_files, diff_patch, run_git
 
 
 class ReviewEngine:
@@ -38,9 +39,13 @@ class ReviewEngine:
         else:
             selected_changes = list(changes)
             files_to_review = [change.path for change in changes]
+        hunks = hunks_for_files(self.root, files_to_review, base=base_ref, staged=staged) if files_to_review else []
+        hunk_mapping = map_hunks_to_nodes(self.store, hunks)
+        changed_symbols = self._changed_symbols(hunk_mapping, files_to_review)
         changed_nodes = self.store.nodes_for_files(files_to_review)
-        impacted_nodes = self.store.impacted_nodes([node.id for node in changed_nodes], depth=self.config.review.max_depth)
-        related_tests = self.store.tests_for_nodes([node.id for node in changed_nodes])
+        impact_seed_nodes = changed_symbols or changed_nodes
+        impacted_nodes = self.store.impacted_nodes([node.id for node in impact_seed_nodes], depth=self.config.review.max_depth)
+        related_tests = self.store.tests_for_nodes([node.id for node in impact_seed_nodes])
         impacted_files = sorted({node.file_path for node in impacted_nodes if node.file_path})
         affected_tests = sorted(
             {
@@ -50,18 +55,32 @@ class ReviewEngine:
             }
         )
         missing_tests = [] if affected_tests else ["No directly related tests found in the graph."]
-        score, reasons = score_risk(files_to_review, changed_nodes, impacted_nodes)
+        changed_line_count = sum(len(set(hunk.changed_lines)) for hunk in hunks)
+        recent_churn = self._recent_churn(files_to_review)
+        score, reasons = score_risk(
+            files_to_review,
+            changed_symbols or changed_nodes,
+            impacted_nodes,
+            changed_line_count=changed_line_count,
+            affected_tests=affected_tests,
+            recent_churn=recent_churn,
+        )
         changed_snippets = {
             path: self._changed_snippet(path, base=base_ref, staged=staged)
             for path in files_to_review[:20]
         }
         diff_summary = self._diff_summary(files_to_review, changed_snippets)
+        public_api_changes = self._public_api_changes(files_to_review, changed_symbols)
+        config_or_infra_changes = self._config_or_infra_changes(files_to_review)
+        database_or_schema_changes = self._database_or_schema_changes(files_to_review, changed_symbols)
+        security_sensitive_changes = self._security_sensitive_changes(files_to_review, changed_symbols)
         packer = ContextPacker(self.store)
         context = packer.pack(
             ContextRequest(
                 task_type="review",
                 query=" ".join(files_to_review[:5]),
                 seed_files=files_to_review,
+                seed_nodes=[node.id for node in changed_symbols],
                 token_budget=self.config.review.token_budget,
                 include_source=True,
                 base_branch=base_ref,
@@ -70,23 +89,117 @@ class ReviewEngine:
         )
         result = ReviewResult(
             changed_files=files_to_review,
+            changed_hunks=[_hunk_payload(hunk) for hunk in hunks],
+            changed_symbols=changed_symbols,
             changed_nodes=changed_nodes,
             impacted_nodes=impacted_nodes,
             impacted_files=impacted_files,
+            impacted_flows=self._impacted_flows(impact_seed_nodes),
             affected_tests=affected_tests,
             missing_tests=missing_tests,
+            public_api_changes=public_api_changes,
+            config_or_infra_changes=config_or_infra_changes,
+            database_or_schema_changes=database_or_schema_changes,
+            security_sensitive_changes=security_sensitive_changes,
             diff_summary=diff_summary,
             changed_snippets=changed_snippets,
             risk_score=score,
             risk_level=risk_level(score),
             risk_explanation=reasons,
-            review_checklist=self._checklist(files_to_review, changed_nodes),
+            prioritized_review_items=self._prioritized_items(
+                public_api_changes,
+                config_or_infra_changes,
+                database_or_schema_changes,
+                security_sensitive_changes,
+                impacted_files,
+                missing_tests,
+            ),
+            review_checklist=self._checklist(files_to_review, changed_symbols or changed_nodes),
             context_pack=context,
-            suggested_commands=self._suggested_commands(affected_tests),
+            suggested_commands=self._suggested_commands(affected_tests, files_to_review),
             warnings=self._warnings(files_to_review, selected_changes),
         )
         self._write_reports(result, base_ref, staged)
         return result
+
+    @staticmethod
+    def _changed_symbols(hunk_mapping: dict[str, list[Node]], files: list[str]) -> list[Node]:
+        symbols: dict[str, Node] = {}
+        for nodes in hunk_mapping.values():
+            for node in nodes:
+                if node.type in {"module", "file"}:
+                    continue
+                symbols[node.id] = node
+        return sorted(
+            symbols.values(),
+            key=lambda node: (files.index(node.file_path) if node.file_path in files else 10_000, node.line_start or 0),
+        )
+
+    def _recent_churn(self, files: list[str]) -> int:
+        churn = 0
+        for path in files[:20]:
+            output = run_git(self.root, ["log", "--since=90 days ago", "--format=%H", "--", path])
+            churn += len([line for line in output.splitlines() if line.strip()])
+        return churn
+
+    @staticmethod
+    def _public_api_changes(files: list[str], symbols: Sequence[Node]) -> list[str]:
+        public_paths = [
+            path for path in files if any(part in path.lower() for part in ("api", "route", "server", "controller"))
+        ]
+        public_symbols = [
+            node.qualified_name
+            for node in symbols
+            if node.type in {"api_endpoint", "class", "function", "type"} and not node.name.startswith("_")
+        ]
+        return sorted({*public_paths, *public_symbols})
+
+    @staticmethod
+    def _config_or_infra_changes(files: list[str]) -> list[str]:
+        suffixes = (".yml", ".yaml", ".toml", ".json", ".env", ".tf", ".tfvars", "Dockerfile")
+        hints = ("docker", "kubernetes", ".github", "workflow", "terraform")
+        return sorted(
+            path
+            for path in files
+            if path.endswith(suffixes) or any(hint in path.lower() for hint in hints)
+        )
+
+    @staticmethod
+    def _database_or_schema_changes(files: list[str], symbols: Sequence[Node]) -> list[str]:
+        path_hits = [
+            path
+            for path in files
+            if any(hint in path.lower() for hint in ("schema", "migration", "database", "sql", "prisma", "alembic"))
+        ]
+        symbol_hits = [
+            node.qualified_name for node in symbols if node.type in {"database_table", "schema"}
+        ]
+        return sorted({*path_hits, *symbol_hits})
+
+    @staticmethod
+    def _security_sensitive_changes(files: list[str], symbols: Sequence[Node]) -> list[str]:
+        hints = ("auth", "token", "secret", "password", "permission", "crypto", "session", "jwt")
+        path_hits = [path for path in files if any(hint in path.lower() for hint in hints)]
+        symbol_hits = [
+            node.qualified_name
+            for node in symbols
+            if any(hint in node.qualified_name.lower() for hint in hints)
+        ]
+        return sorted({*path_hits, *symbol_hits})
+
+    def _impacted_flows(self, nodes: Sequence[Node]) -> list[dict[str, object]]:
+        flows: list[dict[str, object]] = []
+        for node in nodes[:5]:
+            neighborhood = self.store.get_neighborhood([node.id], depth=1, limit=20)
+            if neighborhood["edges"]:
+                flows.append(
+                    {
+                        "entry": node.qualified_name,
+                        "node_count": len(neighborhood["nodes"]),
+                        "edge_count": len(neighborhood["edges"]),
+                    }
+                )
+        return flows
 
     def _write_reports(self, result: ReviewResult, base: str | None, staged: bool) -> None:
         reports = self.store.storage_path / "reports"
@@ -138,6 +251,30 @@ class ReviewEngine:
         return warnings
 
     @staticmethod
+    def _prioritized_items(
+        public_api_changes: list[str],
+        config_or_infra_changes: list[str],
+        database_or_schema_changes: list[str],
+        security_sensitive_changes: list[str],
+        impacted_files: list[str],
+        missing_tests: list[str],
+    ) -> list[str]:
+        items: list[str] = []
+        if security_sensitive_changes:
+            items.append("Review authentication, authorization, secret handling, and audit logging first.")
+        if public_api_changes:
+            items.append("Check public API compatibility, request/response contracts, and callers.")
+        if database_or_schema_changes:
+            items.append("Validate migrations, rollback behavior, and data-access callers.")
+        if config_or_infra_changes:
+            items.append("Validate environment, CI, deployment, and local developer defaults.")
+        if impacted_files:
+            items.append("Inspect impacted files with graph dependents before approving.")
+        if missing_tests:
+            items.append("Add or update tests around changed symbols and impacted behavior.")
+        return items or ["Review changed symbols, run related tests, and verify context-pack uncertainty."]
+
+    @staticmethod
     def _checklist(files: list[str], changed_nodes: Sequence[Node]) -> list[str]:
         checklist = [
             "Verify changed behavior against related tests.",
@@ -153,8 +290,10 @@ class ReviewEngine:
         return checklist
 
     @staticmethod
-    def _suggested_commands(affected_tests: list[str]) -> list[str]:
+    def _suggested_commands(affected_tests: list[str], files: list[str]) -> list[str]:
         commands = ["devgraph explain <changed-file-or-symbol>", "devgraph handoff"]
+        if files:
+            commands.insert(0, f"devgraph explain {files[0]}")
         if affected_tests:
             commands.insert(0, "Run related tests listed in the review output.")
         return commands
@@ -162,6 +301,10 @@ class ReviewEngine:
 
 def format_review_markdown(result: ReviewResult) -> str:
     changed_files = [f"- `{path}`" for path in result.changed_files] or ["- No changed files detected."]
+    changed_symbols = [
+        f"- `{node.qualified_name}` ({node.type}, lines {node.line_start}-{node.line_end})"
+        for node in result.changed_symbols
+    ] or ["- No changed symbols mapped from diff hunks."]
     impacted_files = [f"- `{path}`" for path in result.impacted_files] or [
         "- No impacted files detected."
     ]
@@ -182,8 +325,20 @@ def format_review_markdown(result: ReviewResult) -> str:
         "## Changed files",
         *changed_files,
         "",
+        "## Changed symbols",
+        *changed_symbols,
+        "",
         "## Diff summary",
         *diff_summary,
+        "",
+        "## Prioritized review items",
+        *[f"- {item}" for item in result.prioritized_review_items],
+        "",
+        "## Sensitive areas",
+        *[f"- Public/API: `{item}`" for item in result.public_api_changes[:10]],
+        *[f"- Config/infra: `{item}`" for item in result.config_or_infra_changes[:10]],
+        *[f"- Database/schema: `{item}`" for item in result.database_or_schema_changes[:10]],
+        *[f"- Security: `{item}`" for item in result.security_sensitive_changes[:10]],
         "",
         "## Impacted files",
         *impacted_files,
@@ -210,6 +365,18 @@ def format_review_markdown(result: ReviewResult) -> str:
 
 def _normalize_review_path(path: str | Path) -> str:
     return Path(path).as_posix().lstrip("./")
+
+
+def _hunk_payload(hunk: DiffHunk) -> dict[str, object]:
+    return {
+        "file_path": hunk.file_path,
+        "old_start": hunk.old_start,
+        "old_count": hunk.old_count,
+        "new_start": hunk.new_start,
+        "new_count": hunk.new_count,
+        "changed_lines": hunk.changed_lines,
+        "text": _trim_patch(hunk.text, max_lines=80),
+    }
 
 
 def _trim_patch(patch: str, max_lines: int = 160) -> str:

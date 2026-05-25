@@ -9,11 +9,11 @@ from devgraph.core.schema import ExtractionResult, Node
 from devgraph.extractors.base import (
     BaseExtractor,
     contains_edge,
-    make_chunk,
     make_file_node,
     make_file_record,
     read_text,
 )
+from devgraph.retrieval.chunking import chunk_config
 
 
 class EnvExtractor(BaseExtractor):
@@ -47,6 +47,5 @@ class EnvExtractor(BaseExtractor):
             file=record,
             nodes=[file_node, config],
             edges=[contains_edge(file_node, config, "env")],
-            chunks=[make_chunk(record.path, safe_text, "config", config)],
+            chunks=chunk_config(record.path, safe_text, config),
         )
-

@@ -10,13 +10,13 @@ from devgraph.core.schema import Edge, ExtractionResult, Node
 from devgraph.extractors.base import (
     BaseExtractor,
     contains_edge,
-    make_chunk,
     make_file_node,
     make_file_record,
     read_text,
     redact_secrets,
     section_slug,
 )
+from devgraph.retrieval.chunking import chunk_markdown
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 
@@ -70,6 +70,5 @@ class MarkdownExtractor(BaseExtractor):
             file=record,
             nodes=nodes,
             edges=edges,
-            chunks=[make_chunk(record.path, text, "document", document)],
+            chunks=chunk_markdown(record.path, text, nodes),
         )
-

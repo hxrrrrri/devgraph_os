@@ -9,12 +9,12 @@ from devgraph.core.schema import ExtractionResult, Node
 from devgraph.extractors.base import (
     BaseExtractor,
     contains_edge,
-    make_chunk,
     make_file_node,
     make_file_record,
     read_text,
     redact_secrets,
 )
+from devgraph.retrieval.chunking import chunk_text
 
 
 class DockerExtractor(BaseExtractor):
@@ -38,6 +38,5 @@ class DockerExtractor(BaseExtractor):
             file=record,
             nodes=[file_node, resource],
             edges=[contains_edge(file_node, resource, "dockerfile")],
-            chunks=[make_chunk(record.path, text, "infra", resource)],
+            chunks=chunk_text(record.path, text, resource, "infra"),
         )
-

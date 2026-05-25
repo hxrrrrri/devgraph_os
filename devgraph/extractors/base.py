@@ -70,17 +70,18 @@ def contains_edge(parent: Node, child: Node, source: str) -> Edge:
 
 
 def make_chunk(file_path: str, text: str, kind: str = "source", node: Node | None = None) -> Chunk:
+    safe_text = redact_secrets(text)
     line_count = text.count("\n") + 1 if text else 1
     return Chunk(
-        id=chunk_id(file_path, 1, line_count, text),
+        id=chunk_id(file_path, 1, line_count, safe_text),
         file_path=file_path,
         node_id=node.id if node else None,
         kind=kind,
-        content=text,
+        content=safe_text,
         line_start=1,
         line_end=line_count,
-        token_estimate=max(1, len(text) // 4),
-        content_hash=content_hash(text),
+        token_estimate=max(1, len(safe_text) // 4),
+        content_hash=content_hash(safe_text),
     )
 
 
@@ -118,4 +119,3 @@ def redact_secrets(text: str) -> str:
 def section_slug(text: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return slug or "section"
-

@@ -17,27 +17,57 @@
     "onCommand:devgraph.explainCurrentFile",
     "onCommand:devgraph.explainSelection",
     "onCommand:devgraph.ask",
+    "onCommand:devgraph.searchGraph",
+    "onCommand:devgraph.traceFlow",
     "onCommand:devgraph.doctor",
     "onCommand:devgraph.rememberDecision",
     "onCommand:devgraph.showMemories",
     "onCommand:devgraph.openDashboard",
-    "onCommand:devgraph.handoff"
+    "onCommand:devgraph.handoff",
+    "onCommand:devgraph.copyHandoffPrompt",
+    "onCommand:devgraph.openReviewReport",
+    "onCommand:devgraph.openOnboardingGuide"
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "DevGraph OS",
+      "properties": {
+        "devgraph.binaryPath": {
+          "type": "string",
+          "default": "devgraph",
+          "description": "Path to the DevGraph CLI binary."
+        },
+        "devgraph.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Refresh the DevGraph sidebar after commands."
+        },
+        "devgraph.dashboardPort": {
+          "type": "number",
+          "default": 38987,
+          "description": "Local dashboard port."
+        }
+      }
+    },
     "commands": [
       { "command": "devgraph.init", "title": "DevGraph: Initialize Project" },
       { "command": "devgraph.build", "title": "DevGraph: Build Graph" },
       { "command": "devgraph.update", "title": "DevGraph: Update Graph" },
       { "command": "devgraph.reviewChanges", "title": "DevGraph: Review Current Changes" },
       { "command": "devgraph.explainCurrentFile", "title": "DevGraph: Explain Current File" },
-      { "command": "devgraph.explainSelection", "title": "DevGraph: Explain Symbol" },
+      { "command": "devgraph.explainSelection", "title": "DevGraph: Explain Selection" },
       { "command": "devgraph.ask", "title": "DevGraph: Ask About Project" },
+      { "command": "devgraph.searchGraph", "title": "DevGraph: Search Graph" },
+      { "command": "devgraph.traceFlow", "title": "DevGraph: Trace Flow from Selection" },
       { "command": "devgraph.doctor", "title": "DevGraph: Run Doctor" },
       { "command": "devgraph.rememberDecision", "title": "DevGraph: Remember Decision" },
       { "command": "devgraph.showMemories", "title": "DevGraph: Show Memories" },
       { "command": "devgraph.openDashboard", "title": "DevGraph: Open Dashboard" },
-      { "command": "devgraph.handoff", "title": "DevGraph: Generate Handoff" }
+      { "command": "devgraph.handoff", "title": "DevGraph: Generate Handoff" },
+      { "command": "devgraph.copyHandoffPrompt", "title": "DevGraph: Copy Handoff Prompt" },
+      { "command": "devgraph.openReviewReport", "title": "DevGraph: Open Review Report" },
+      { "command": "devgraph.openOnboardingGuide", "title": "DevGraph: Open Onboarding Guide" }
     ],
     "viewsContainers": {
       "activitybar": [

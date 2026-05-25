@@ -1,29 +1,11 @@
 # Graph Schema
 
-## Node Types
+Core tables are `files`, `nodes`, `edges`, `chunks`, `provenance`, `changes`, `memories`, `sessions`, `snapshots`, and optional `embeddings`.
 
-`repository`, `file`, `module`, `function`, `class`, `type`, `test`, `api_endpoint`, `database_table`, `schema`, `config`, `service`, `pipeline`, `resource`, `document`, `section`, `article`, `claim`, `entity`, `domain`, `flow`, `step`, `commit`, `pull_request`, `session`, `decision`.
+Important node types include `file`, `module`, `class`, `function`, `test`, `api_endpoint`, `database_table`, `schema`, `config`, `resource`, `document`, `section`, `flow`, and `decision`.
 
-## Edge Types
+Important edge types include `contains`, `imports`, `calls`, `inherits`, `implements`, `tested_by`, `depends_on`, `reads_from`, `writes_to`, `routes_to`, `documents`, and `affects`.
 
-`contains`, `imports`, `calls`, `inherits`, `implements`, `tested_by`, `depends_on`, `reads_from`, `writes_to`, `routes_to`, `configures`, `deploys`, `documents`, `belongs_to`, `cites`, `contradicts`, `builds_on`, `affects`, `changed_in`, `discussed_in`, `similar_to`.
+Every parser fact carries `confidence_tier`: `extracted`, `inferred`, `ambiguous`, `llm`, or `user`.
 
-## Confidence Tiers
-
-- `extracted`: deterministic parser result.
-- `inferred`: deterministic but indirect inference.
-- `llm`: model-generated semantic enrichment.
-- `ambiguous`: uncertain result needing user review.
-- `user`: user-approved or manually added knowledge.
-
-Every node and edge stores its confidence tier. Deterministic facts and model-generated claims must not be mixed without labeling.
-
-## Supporting Tables
-
-- `files`: indexed file records, deletion state, hash, language, and freshness.
-- `chunks`: retrievable source/docs/config excerpts with token estimates.
-- `changes`: local git change metadata recorded during incremental updates.
-- `snapshots`: local JSON graph snapshots produced by builds and updates.
-- `sessions`: generated review/handoff/onboarding sessions.
-- `memories`: explicit user-approved project memories, with secret-like values redacted before storage.
-- `provenance`: source path, lines, confidence tier, and metadata for extracted graph entities.
+Chunks include `file_path`, optional `node_id`, `kind`, line range, token estimate, hash, metadata, and provenance.

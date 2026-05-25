@@ -8,6 +8,8 @@ Developers and AI coding agents should never read a codebase blindly again.
 
 - Indexes repositories into a SQLite-backed graph with deterministic provenance.
 - Extracts files, symbols, imports, calls, docs, configs, routes, tests, and change data.
+- Uses Tree-sitter semantic extraction for supported local grammars and Python AST extraction for Python.
+- Supports optional local embeddings for hybrid FTS/vector retrieval without cloud calls.
 - Answers explain, ask, review, debug, onboarding, and handoff workflows from graph-grounded context.
 - Serves a local dashboard and MCP tool surface for AI coding agents.
 - Keeps all default processing local with no telemetry and no cloud calls.
@@ -21,7 +23,7 @@ devgraph build
 devgraph status
 devgraph explain src/auth/login.ts
 devgraph review
-devgraph serve
+devgraph dashboard
 ```
 
 The default storage lives under `.devgraph/`.
@@ -30,12 +32,14 @@ The default storage lives under `.devgraph/`.
 
 ```bash
 devgraph ask "How does authentication work?"
+devgraph search "login user authentication" --json
 devgraph path AuthService DatabasePool
 devgraph trace AuthService.login
 devgraph review --base origin/main
 devgraph review --staged
 devgraph review --files src/auth.py src/server.ts
-devgraph debug "TypeError in src/auth/login.ts line 42"
+devgraph debug "TypeError in src/auth/login.ts line 42" --json
+devgraph embed --local-hash
 devgraph remember --kind decision "We use SQLite as the local graph store."
 devgraph memories
 devgraph onboard
@@ -52,7 +56,7 @@ Start the MCP server:
 devgraph mcp
 ```
 
-The server exposes a compact tool surface including `build_or_update_graph`, `get_project_status`, `doctor`, `get_context`, `review_changes`, `explain`, `query_graph`, memory tools, and `handoff_session`. See [docs/MCP.md](docs/MCP.md).
+The server exposes a compact tool surface including `build_or_update_graph`, `get_project_status`, `doctor`, `get_context`, `review_changes`, `explain`, hybrid `query_graph`/`search`, memory tools, and `handoff_session`. See [docs/MCP.md](docs/MCP.md).
 
 ## VS Code Extension
 
@@ -66,15 +70,15 @@ The dashboard in `apps/dashboard` is a Vite/React app backed by the local HTTP s
 devgraph dashboard
 ```
 
-The dashboard includes graph visualization, review, debug, onboarding, and knowledge lenses backed by local HTTP APIs.
+The dashboard is a dark developer command center with command, graph, review, debug, onboarding, knowledge, and flow lenses backed by local HTTP APIs.
 
 ## Architecture
 
 DevGraph OS has four main layers:
 
-1. Extractors convert project artifacts into typed graph nodes, edges, and retrievable chunks.
-2. The SQLite graph store persists canonical facts, FTS indexes, snapshots, sessions, and provenance.
-3. Intelligence modules run review, debug, onboarding, explain, handoff, and context-packing workflows.
+1. Extractors convert project artifacts into typed graph nodes, edges, semantic metadata, SQL/database references, API routes, and focused retrievable chunks.
+2. The SQLite graph store persists canonical facts, FTS indexes, local embedding vectors, snapshots, sessions, and provenance.
+3. Intelligence modules run review, debug, onboarding, explain, handoff, hybrid search, and context-packing workflows.
 4. Interfaces expose the same engine through CLI, MCP, dashboard, VS Code, and slash-command templates.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -85,11 +89,18 @@ DevGraph OS is local-first by default:
 
 - No telemetry.
 - No analytics.
-- No cloud calls by default.
+- No cloud calls by default. Embeddings are disabled unless explicitly enabled or run with `devgraph embed --local-hash`.
 - `.env` values and likely secrets are redacted.
 - Deterministic facts, inferred facts, LLM facts, ambiguous facts, and user-approved facts carry separate confidence tiers.
 - Optional LLM enrichment must be explicitly enabled in `devgraph.toml`.
 
 ## Roadmap
 
-The first implementation focuses on a usable local graph, review context, MCP tools, dashboard shell, and VS Code shell. Future work expands Tree-sitter coverage, semantic embeddings, richer flow detection, multi-repo graphs, and optional managed collaboration workflows. See [docs/ROADMAP.md](docs/ROADMAP.md).
+## Current Limitations
+
+- Tree-sitter is used when `tree-sitter-language-pack` is installed; otherwise DevGraph falls back to conservative AST/regex extraction and marks uncertain facts.
+- Review, debug, onboarding, and handoff are deterministic rule-based intelligence workflows. They are useful without an LLM, but they do not claim autonomous reasoning.
+- Optional `sentence-transformers` semantic search requires local model availability. DevGraph never calls hosted embedding APIs unless future OpenAI-compatible settings are explicitly configured.
+- Dashboard data comes from the local HTTP API; if the graph is stale, the UI shows stale or empty states rather than fake data.
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the remaining product roadmap.

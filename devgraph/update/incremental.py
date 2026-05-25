@@ -9,6 +9,7 @@ from pathlib import Path
 from devgraph.config import DevGraphConfig
 from devgraph.core.graph_store import GraphStore
 from devgraph.extractors.registry import ExtractorRegistry, classify_file
+from devgraph.retrieval.embeddings import index_extraction_embeddings
 from devgraph.update.fingerprints import file_hash
 from devgraph.update.git import changed_files, diff_patch
 from devgraph.update.ignore import IgnoreMatcher
@@ -18,6 +19,7 @@ from devgraph.update.ignore import IgnoreMatcher
 class BuildStats:
     scanned: int = 0
     indexed: int = 0
+    embeddings_indexed: int = 0
     skipped: int = 0
     deleted: int = 0
     warnings: list[str] = field(default_factory=list)
@@ -55,6 +57,8 @@ def build_graph(root: Path, config: DevGraphConfig, store: GraphStore, force: bo
         result = registry.extract(root, path)
         stats.warnings.extend(result.warnings)
         store.replace_file_graph(result.file, result.nodes, result.edges, result.chunks)
+        indexed_embeddings = index_extraction_embeddings(store, result, config)
+        stats.embeddings_indexed += indexed_embeddings
         stats.indexed += 1
     if stats.indexed:
         store.refresh_inferred_relationships()
@@ -99,6 +103,8 @@ def update_graph(
         result = registry.extract(root, path)
         stats.warnings.extend(result.warnings)
         store.replace_file_graph(result.file, result.nodes, result.edges, result.chunks)
+        indexed_embeddings = index_extraction_embeddings(store, result, config)
+        stats.embeddings_indexed += indexed_embeddings
         stats.indexed += 1
     if stats.indexed or stats.deleted:
         store.refresh_inferred_relationships()

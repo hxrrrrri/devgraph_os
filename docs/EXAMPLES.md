@@ -1,37 +1,19 @@
 # Examples
 
-## Build And Explain
-
 ```bash
-devgraph init
 devgraph build
-devgraph explain src/main.py
+devgraph review --json
+devgraph debug 'File "src/app.py", line 12, in main' --json
+devgraph explain src/auth.py
+devgraph remember --kind decision "Keep graph storage local in SQLite."
+devgraph handoff
 ```
 
-## Review
+For external documentation:
 
 ```bash
-devgraph update
-devgraph review --staged
+devgraph ingest ../notes/system-design.md
+devgraph wiki
 ```
 
-Outputs:
-
-- `.devgraph/reports/review.md`
-- `.devgraph/reports/review.json`
-
-## Dashboard
-
-```bash
-devgraph dashboard
-```
-
-Screenshot placeholders:
-
-- Project Overview
-- Graph View
-- Review Lens
-- Debug Lens
-- Onboarding Lens
-- Knowledge Lens
-
+External ingested files are copied under `.devgraph/imports/`.

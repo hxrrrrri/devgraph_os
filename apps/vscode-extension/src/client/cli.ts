@@ -10,8 +10,9 @@ export function workspaceRoot(): string {
 }
 
 export function runDevGraph(args: string[]): Promise<string> {
+  const binary = vscode.workspace.getConfiguration("devgraph").get<string>("binaryPath", "devgraph");
   return new Promise((resolve, reject) => {
-    execFile("devgraph", args, { cwd: workspaceRoot(), maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+    execFile(binary, args, { cwd: workspaceRoot(), maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(stderr || error.message));
         return;
@@ -20,4 +21,3 @@ export function runDevGraph(args: string[]): Promise<string> {
     });
   });
 }
-

@@ -1,36 +1,15 @@
 # Context Engine
 
-The context engine follows this flow:
+Context packs are task-specific and deterministic.
 
-1. Detect task type and query intent.
-2. Find seed nodes by exact match and SQLite FTS.
-3. Expand the graph around seed nodes.
-4. Include docs, configs, tests, and source chunks when relevant.
-5. Add user-approved memories and diff snippets when the workflow provides them.
-6. Rank by match quality, graph confidence, and graph distance.
-7. Pack results into the selected token budget.
+Supported task types are `review`, `debug`, `explain`, `ask`, `onboard`, `refactor`, and `handoff`.
 
-Budgets:
+The packer ranks by exact symbol match, local FTS/semantic matches when available, graph neighborhood, confidence, provenance, changed-file seeds, tests, docs/config relevance, and token budget.
 
-- `tiny`: about 700 tokens.
-- `normal`: about 4000 tokens.
-- `deep`: about 12000 tokens.
-- `full`: no strict limit.
+User-facing graph paths use readable qualified names:
 
-Context packs use this structure:
-
-```markdown
-# DevGraph Context Pack
-## Task
-## Summary
-## High-confidence facts
-## Relevant files
-## Relevant symbols
-## Graph paths
-## Changed code snippets
-## Tests
-## Project memories
-## Docs/configs
-## Risks / uncertainty
-## Suggested next actions
+```text
+src/auth.py::AuthService.login --calls--> src/db.py::Database.connect
 ```
+
+Internal IDs are not shown in the graph path section. Source excerpts come from focused chunks with file path and line ranges.

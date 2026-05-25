@@ -1,24 +1,20 @@
 # Roadmap
 
-## Phase 1
+Implemented in this version:
 
-- Python package, CLI, config, SQLite graph store, migrations.
-- File scanner, ignore system, basic code/docs/config extraction.
-- `init`, `build`, `status`, `explain`, `review`, `serve`.
+- Focused chunking.
+- Multilanguage parser fallback with Tree-sitter adapter.
+- SQL table references.
+- Diff hunk parsing and changed-symbol mapping.
+- Rule-based review/debug/onboarding/handoff.
+- MCP and HTTP endpoints for local agents and dashboard.
+- Premium dark dashboard shell.
+- VS Code command and sidebar upgrades.
 
-## Phase 2
+Remaining work:
 
-- Stronger Tree-sitter grammar coverage.
-- Local embeddings and hybrid ranking.
-- Richer flow and community detection.
-
-## Phase 3
-
-- Deeper dashboard interactions.
-- Multi-repo graph federation.
-- Optional LLM enrichment providers with explicit privacy prompts.
-
-## Phase 4
-
-- Collaboration memory, PR annotations, and richer IDE integrations.
-
+- Deeper framework-specific extraction beyond common routes.
+- More precise Tree-sitter queries per language.
+- Richer stale-doc verification and docs-code claim linking.
+- Optional local semantic models beyond the hash vectorizer.
+- More dashboard drilldowns and persisted UI state.

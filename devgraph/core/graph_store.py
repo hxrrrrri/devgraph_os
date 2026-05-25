@@ -11,7 +11,7 @@ from typing import Any
 import networkx as nx
 
 from devgraph.constants import SECRET_KEY_HINTS
-from devgraph.core.ids import stable_hash
+from devgraph.core.ids import edge_id, stable_hash
 from devgraph.core.migrations import run_migrations
 from devgraph.core.schema import Chunk, Edge, FileRecord, GraphStatus, Node, utc_now
 
@@ -24,7 +24,7 @@ class GraphStore:
         self.storage_path = storage_path
         self.db_path = storage_path / "graph.db"
         self.storage_path.mkdir(parents=True, exist_ok=True)
-        for child in ["cache", "snapshots", "reports", "wiki", "sessions", "exports"]:
+        for child in ["cache", "snapshots", "reports", "wiki", "sessions", "exports", "imports"]:
             (self.storage_path / child).mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(self.db_path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
@@ -215,6 +215,7 @@ class GraphStore:
         self.connection.execute("DELETE FROM chunks WHERE file_path = ?", (record.path,))
         self.connection.execute("DELETE FROM edges WHERE file_path = ?", (record.path,))
         self.connection.execute("DELETE FROM provenance WHERE source_path = ?", (record.path,))
+        self.connection.execute("DELETE FROM embeddings WHERE file_path = ?", (record.path,))
         self.upsert_file(record)
         for node in nodes:
             self.upsert_node(node)
@@ -287,6 +288,7 @@ class GraphStore:
         )
         self.connection.execute("DELETE FROM chunks WHERE file_path = ?", (path,))
         self.connection.execute("DELETE FROM provenance WHERE source_path = ?", (path,))
+        self.connection.execute("DELETE FROM embeddings WHERE file_path = ?", (path,))
         self.connection.execute(
             "UPDATE files SET is_deleted = 1, last_indexed_at = ? WHERE path = ?",
             (now, path),
@@ -365,6 +367,81 @@ class GraphStore:
         chunk_rows = self._search_chunks_fts(query, limit)
         chunks = [dict(row) for row in chunk_rows]
         return {"nodes": nodes, "chunks": chunks}
+
+    def upsert_embedding(
+        self,
+        entity_id: str,
+        entity_type: str,
+        provider: str,
+        model: str,
+        vector: list[float],
+        text: str,
+        file_path: str | None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO embeddings(
+                entity_id, entity_type, provider, model, dimensions, vector, text,
+                file_path, metadata, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(entity_id, provider, model) DO UPDATE SET
+                dimensions=excluded.dimensions,
+                vector=excluded.vector,
+                text=excluded.text,
+                file_path=excluded.file_path,
+                metadata=excluded.metadata,
+                updated_at=excluded.updated_at
+            """,
+            (
+                entity_id,
+                entity_type,
+                provider,
+                model,
+                len(vector),
+                json.dumps(vector),
+                text,
+                file_path,
+                json.dumps(metadata or {}, sort_keys=True),
+                utc_now(),
+            ),
+        )
+
+    def search_embeddings(
+        self,
+        query_vector: list[float],
+        provider: str,
+        model: str,
+        limit: int = 10,
+        entity_types: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT * FROM embeddings
+            WHERE provider = ? AND model = ?
+            ORDER BY updated_at DESC
+            """,
+            (provider, model),
+        ).fetchall()
+        allowed = set(entity_types or [])
+        scored: list[dict[str, Any]] = []
+        for row in rows:
+            if allowed and row["entity_type"] not in allowed:
+                continue
+            try:
+                vector = json.loads(row["vector"])
+            except json.JSONDecodeError:
+                continue
+            score = _cosine(query_vector, vector)
+            if score <= 0:
+                continue
+            data = dict(row)
+            data["metadata"] = json.loads(data.get("metadata") or "{}")
+            data["score"] = score
+            data.pop("vector", None)
+            scored.append(data)
+        return sorted(scored, key=lambda item: item["score"], reverse=True)[:limit]
 
     def get_chunks_for_file(self, file_path: str, limit: int = 5) -> list[Chunk]:
         rows = self.connection.execute(
@@ -659,6 +736,9 @@ class GraphStore:
         self.connection.execute(
             "DELETE FROM edges WHERE confidence_tier = 'inferred' AND type = 'tested_by'"
         )
+        self.connection.execute(
+            "DELETE FROM edges WHERE confidence_tier = 'inferred' AND provenance_source = 'local-import-resolver'"
+        )
         tests = [
             self._row_to_node(row)
             for row in self.connection.execute("SELECT * FROM nodes WHERE type = 'test'").fetchall()
@@ -703,7 +783,54 @@ class GraphStore:
                     metadata={"reason": "test name or path references subject name"},
                 )
                 self.upsert_edge(edge)
+        self._refresh_local_import_edges()
         self.connection.commit()
+
+    def _refresh_local_import_edges(self) -> None:
+        modules = [
+            self._row_to_node(row)
+            for row in self.connection.execute("SELECT * FROM nodes WHERE type = 'module'").fetchall()
+        ]
+        by_qualified = {module.qualified_name: module for module in modules}
+        imports = self.connection.execute(
+            """
+            SELECT e.*, source.file_path AS source_file, target.name AS imported_name
+            FROM edges e
+            JOIN nodes source ON source.id = e.source_id
+            JOIN nodes target ON target.id = e.target_id
+            WHERE e.type = 'imports'
+            """
+        ).fetchall()
+        for row in imports:
+            source = self.get_node(row["source_id"])
+            if source is None:
+                continue
+            target = _resolve_local_module(
+                imported=str(row["imported_name"]),
+                source_file=row["source_file"],
+                modules_by_qualified=by_qualified,
+            )
+            if target is None or target.id == row["target_id"] or target.id == source.id:
+                continue
+            self.upsert_edge(
+                Edge(
+                    id=edge_id(
+                        source.id,
+                        target.id,
+                        "imports",
+                        f"local-import-resolver:{row['imported_name']}",
+                    ),
+                    source_id=source.id,
+                    target_id=target.id,
+                    type="imports",
+                    confidence=0.8,
+                    confidence_tier="inferred",
+                    provenance_source="local-import-resolver",
+                    file_path=source.file_path,
+                    line=row["line"],
+                    metadata={"imported": row["imported_name"]},
+                )
+            )
 
     def write_json_export(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -715,6 +842,12 @@ class GraphStore:
             "memories": [dict(row) for row in self.connection.execute("SELECT * FROM memories").fetchall()],
             "changes": [dict(row) for row in self.connection.execute("SELECT * FROM changes").fetchall()],
             "sessions": [dict(row) for row in self.connection.execute("SELECT * FROM sessions").fetchall()],
+            "embeddings": [
+                dict(row)
+                for row in self.connection.execute(
+                    "SELECT entity_id, entity_type, provider, model, dimensions, file_path, metadata, updated_at FROM embeddings"
+                ).fetchall()
+            ],
         }
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -866,3 +999,44 @@ def _normalize_test_name(name: str) -> str:
         if lower.endswith(suffix):
             lower = lower.removesuffix(suffix)
     return lower.replace("_", "").replace("-", "")
+
+
+def _resolve_local_module(
+    imported: str,
+    source_file: str | None,
+    modules_by_qualified: dict[str, Node],
+) -> Node | None:
+    candidates = _module_candidates(imported, source_file)
+    for candidate in candidates:
+        if candidate in modules_by_qualified:
+            return modules_by_qualified[candidate]
+    return None
+
+
+def _module_candidates(imported: str, source_file: str | None) -> list[str]:
+    cleaned = imported.removeprefix("external::").strip()
+    candidates: list[str] = []
+    if cleaned:
+        candidates.append(cleaned)
+        candidates.append(cleaned.replace("/", ".").strip("."))
+    if source_file and cleaned.startswith("."):
+        source_parent = Path(source_file).parent.as_posix()
+        resolved = (Path(source_parent) / cleaned).as_posix()
+        normalized = resolved.replace("/", ".").strip(".")
+        candidates.append(normalized)
+        for suffix in ("py", "ts", "tsx", "js", "jsx", "go", "rs", "java"):
+            candidates.append(f"{normalized}.{suffix}")
+        for suffix in ("ts", "tsx", "js", "jsx"):
+            candidates.append(f"{normalized}.index.{suffix}")
+    return list(dict.fromkeys(candidates))
+
+
+def _cosine(left: list[float], right: list[float]) -> float:
+    if not left or not right or len(left) != len(right):
+        return 0.0
+    dot = sum(a * b for a, b in zip(left, right, strict=True))
+    left_norm = sum(a * a for a in left) ** 0.5
+    right_norm = sum(b * b for b in right) ** 0.5
+    if left_norm == 0 or right_norm == 0:
+        return 0.0
+    return dot / (left_norm * right_norm)
