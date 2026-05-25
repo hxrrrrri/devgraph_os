@@ -15,16 +15,13 @@ class OfficeExtractor(TextExtractor):
 
             document = docx.Document(str(path))
             text = "\n".join(paragraph.text for paragraph in document.paragraphs)
-            temp = path.with_suffix(path.suffix + ".txt")
-            temp.write_text(text, encoding="utf-8")
-            try:
-                result = super().extract(root, temp)
-                result.file.path = path.relative_to(root).as_posix()
-                result.file.absolute_path = str(path.resolve())
-                result.warnings.append("Office text extracted via optional python-docx dependency.")
-                return result
-            finally:
-                temp.unlink(missing_ok=True)
+            return self.extract_text(
+                root,
+                path,
+                text,
+                language="office",
+                warnings=["Office text extracted via optional python-docx dependency."],
+            )
         except Exception:
             from devgraph.extractors.base import make_file_record
 

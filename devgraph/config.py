@@ -146,6 +146,11 @@ def _write_platform_instructions(project_root: Path, platform: str) -> list[Path
         render_platform_instructions,
     )
 
+    known = {"claude", "codex", "cursor", "copilot", "gemini", "generic", "all"}
+    if platform not in known:
+        raise ValueError(
+            "platform must be one of: claude, codex, cursor, copilot, gemini, generic, all"
+        )
     requested = ["claude", "codex", "cursor", "copilot", "gemini", "generic"] if platform == "all" else [platform]
     created: list[Path] = []
     for item in requested:

@@ -11,8 +11,10 @@ It contributes:
 - DevGraph: Explain Current File
 - DevGraph: Explain Symbol
 - DevGraph: Ask About Project
+- DevGraph: Run Doctor
+- DevGraph: Remember Decision
+- DevGraph: Show Memories
 - DevGraph: Open Dashboard
 - DevGraph: Generate Handoff
 
-The extension calls the local `devgraph` CLI with child processes. This keeps v1 simple and avoids a second backend. The sidebar displays graph status from `devgraph status --json`.
-
+The extension calls the local `devgraph` CLI with child processes. This keeps the extension local-first and avoids a second backend. The sidebar displays graph status from `devgraph status --json` and exposes quick actions for diagnostics and memories.

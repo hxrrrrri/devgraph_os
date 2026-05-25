@@ -170,7 +170,18 @@ MIGRATIONS: list[tuple[int, str]] = [
             content
         );
         """,
-    )
+    ),
+    (
+        2,
+        """
+        CREATE INDEX IF NOT EXISTS idx_changes_file_path ON changes(file_path);
+        CREATE INDEX IF NOT EXISTS idx_changes_changed_at ON changes(changed_at);
+        CREATE INDEX IF NOT EXISTS idx_memories_kind ON memories(kind);
+        CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at);
+        CREATE INDEX IF NOT EXISTS idx_provenance_entity ON provenance(entity_id, entity_type);
+        CREATE INDEX IF NOT EXISTS idx_provenance_source_path ON provenance(source_path);
+        """,
+    ),
 ]
 
 
@@ -185,4 +196,3 @@ def run_migrations(connection: sqlite3.Connection) -> None:
         connection.executescript(sql)
         connection.execute("INSERT INTO schema_migrations(version) VALUES (?)", (version,))
     connection.commit()
-

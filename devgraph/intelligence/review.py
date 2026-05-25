@@ -20,46 +20,70 @@ class ReviewEngine:
         self.config = config
         self.store = store
 
-    def review(self, base: str | None = None, staged: bool = False) -> ReviewResult:
+    def review(
+        self,
+        base: str | None = None,
+        staged: bool = False,
+        files: Sequence[str] | None = None,
+    ) -> ReviewResult:
         base_ref = base
         changes = changed_files(self.root, base=base_ref, staged=staged)
-        files = [change.path for change in changes]
-        changed_nodes = self.store.nodes_for_files(files)
+        selected_files = [_normalize_review_path(path) for path in files or []]
+        if selected_files:
+            change_by_path = {change.path: change for change in changes}
+            selected_changes = [
+                change_by_path.get(path) for path in selected_files if path in change_by_path
+            ]
+            files_to_review = selected_files
+        else:
+            selected_changes = list(changes)
+            files_to_review = [change.path for change in changes]
+        changed_nodes = self.store.nodes_for_files(files_to_review)
         impacted_nodes = self.store.impacted_nodes([node.id for node in changed_nodes], depth=self.config.review.max_depth)
+        related_tests = self.store.tests_for_nodes([node.id for node in changed_nodes])
         impacted_files = sorted({node.file_path for node in impacted_nodes if node.file_path})
         affected_tests = sorted(
             {
                 node.file_path or node.qualified_name
-                for node in [*changed_nodes, *impacted_nodes]
+                for node in [*changed_nodes, *impacted_nodes, *related_tests]
                 if node.type == "test"
             }
         )
         missing_tests = [] if affected_tests else ["No directly related tests found in the graph."]
-        score, reasons = score_risk(files, changed_nodes, impacted_nodes)
+        score, reasons = score_risk(files_to_review, changed_nodes, impacted_nodes)
+        changed_snippets = {
+            path: self._changed_snippet(path, base=base_ref, staged=staged)
+            for path in files_to_review[:20]
+        }
+        diff_summary = self._diff_summary(files_to_review, changed_snippets)
         packer = ContextPacker(self.store)
         context = packer.pack(
             ContextRequest(
                 task_type="review",
-                query=" ".join(files[:5]),
-                seed_files=files,
+                query=" ".join(files_to_review[:5]),
+                seed_files=files_to_review,
                 token_budget=self.config.review.token_budget,
                 include_source=True,
                 base_branch=base_ref,
+                diff_snippets=changed_snippets,
             )
         )
         result = ReviewResult(
-            changed_files=files,
+            changed_files=files_to_review,
             changed_nodes=changed_nodes,
             impacted_nodes=impacted_nodes,
             impacted_files=impacted_files,
             affected_tests=affected_tests,
             missing_tests=missing_tests,
+            diff_summary=diff_summary,
+            changed_snippets=changed_snippets,
             risk_score=score,
             risk_level=risk_level(score),
             risk_explanation=reasons,
-            review_checklist=self._checklist(files, changed_nodes),
+            review_checklist=self._checklist(files_to_review, changed_nodes),
             context_pack=context,
             suggested_commands=self._suggested_commands(affected_tests),
+            warnings=self._warnings(files_to_review, selected_changes),
         )
         self._write_reports(result, base_ref, staged)
         return result
@@ -76,6 +100,42 @@ class ReviewEngine:
             for path in result.changed_files[:20]
         }
         (reports / "review.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def _changed_snippet(self, path: str, base: str | None, staged: bool) -> str:
+        patch = diff_patch(self.root, path, base=base, staged=staged)
+        if patch:
+            return _trim_patch(patch)
+        file_path = self.root / path
+        if file_path.exists() and file_path.is_file():
+            try:
+                lines = file_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                return "No readable diff or source excerpt available."
+            excerpt = "\n".join(f"{index + 1}: {line}" for index, line in enumerate(lines[:80]))
+            return f"No git diff available. Current file excerpt:\n{excerpt}"
+        return "No readable diff or source excerpt available."
+
+    @staticmethod
+    def _diff_summary(files: list[str], snippets: dict[str, str]) -> list[str]:
+        summary: list[str] = []
+        for path in files:
+            snippet = snippets.get(path, "")
+            added = sum(1 for line in snippet.splitlines() if line.startswith("+") and not line.startswith("+++"))
+            removed = sum(1 for line in snippet.splitlines() if line.startswith("-") and not line.startswith("---"))
+            if added or removed:
+                summary.append(f"{path}: +{added}/-{removed} lines in available diff.")
+            else:
+                summary.append(f"{path}: no git diff available; using graph/source context.")
+        return summary
+
+    @staticmethod
+    def _warnings(files: list[str], selected_changes: Sequence[object | None]) -> list[str]:
+        warnings: list[str] = []
+        if files and not selected_changes:
+            warnings.append("Review was scoped with --files; git change metadata was not available for those paths.")
+        if not files:
+            warnings.append("No changed files were detected. Use --files to review specific paths.")
+        return warnings
 
     @staticmethod
     def _checklist(files: list[str], changed_nodes: Sequence[Node]) -> list[str]:
@@ -111,13 +171,19 @@ def format_review_markdown(result: ReviewResult) -> str:
     missing_tests = [f"- {item}" for item in result.missing_tests] or [
         "- No missing-test signal found."
     ]
+    diff_summary = [f"- {item}" for item in result.diff_summary] or ["- No diff summary available."]
+    warnings = [f"- {item}" for item in result.warnings]
     lines = [
         "# DevGraph Review",
         "",
         f"Risk: **{result.risk_level}** ({result.risk_score}/100)",
         "",
+        *([] if not warnings else ["## Warnings", *warnings, ""]),
         "## Changed files",
         *changed_files,
+        "",
+        "## Diff summary",
+        *diff_summary,
         "",
         "## Impacted files",
         *impacted_files,
@@ -140,3 +206,14 @@ def format_review_markdown(result: ReviewResult) -> str:
         result.context_pack,
     ]
     return "\n".join(lines)
+
+
+def _normalize_review_path(path: str | Path) -> str:
+    return Path(path).as_posix().lstrip("./")
+
+
+def _trim_patch(patch: str, max_lines: int = 160) -> str:
+    lines = patch.splitlines()
+    if len(lines) <= max_lines:
+        return patch
+    return "\n".join([*lines[:max_lines], f"... truncated {len(lines) - max_lines} diff lines ..."])

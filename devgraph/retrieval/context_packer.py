@@ -19,6 +19,7 @@ class ContextRequest:
     token_budget: str = "normal"
     include_source: bool = True
     base_branch: str | None = None
+    diff_snippets: dict[str, str] = field(default_factory=dict)
 
 
 class ContextPacker:
@@ -36,6 +37,7 @@ class ContextPacker:
         if request.include_source:
             for file_path in relevant_files[:8]:
                 chunks.extend(self.store.get_chunks_for_file(file_path, limit=1))
+        memories = self.store.relevant_memories(request.query, limit=6)
         lines = [
             "# DevGraph Context Pack",
             "",
@@ -61,10 +63,13 @@ class ContextPacker:
             *self._graph_edges(neighborhood["edges"]),
             "",
             "## Changed code snippets",
-            "No diff snippets were provided to this context pack.",
+            *self._diff_snippets(request.diff_snippets),
             "",
             "## Tests",
             *self._tests(ranked_nodes),
+            "",
+            "## Project memories",
+            *self._memories(memories),
             "",
             "## Docs/configs",
             *[
@@ -82,9 +87,10 @@ class ContextPacker:
         if chunks:
             lines.extend(["", "## Source excerpts"])
             for chunk in chunks[:8]:
+                line_range = f"{chunk.line_start or 1}-{chunk.line_end or '?'}"
                 lines.extend(
                     [
-                        f"### `{chunk.file_path}`",
+                        f"### `{chunk.file_path}` lines {line_range}",
                         "```",
                         chunk.content[:2500],
                         "```",
@@ -126,10 +132,31 @@ class ContextPacker:
     @staticmethod
     def _graph_edges(edges: list[dict[str, object]]) -> list[str]:
         lines = [
-            f"- `{edge['source_id']}` --{edge['type']}--> `{edge['target_id']}`"
+            f"- `{edge['source_id']}` --{edge['type']}--> `{edge['target_id']}` "
+            f"(source: `{edge.get('provenance_source', 'unknown')}`)"
             for edge in edges[:20]
         ]
         return lines or ["- No graph paths found for the current seed nodes."]
+
+    @staticmethod
+    def _diff_snippets(snippets: dict[str, str]) -> list[str]:
+        if not snippets:
+            return ["No diff snippets were provided to this context pack."]
+        lines: list[str] = []
+        for path, snippet in list(snippets.items())[:8]:
+            lines.extend([f"### `{path}`", "```diff", snippet[:3000], "```"])
+        return lines
+
+    @staticmethod
+    def _memories(memories: list[dict[str, object]]) -> list[str]:
+        if not memories:
+            return ["- No user-approved project memories matched this request."]
+        lines = []
+        for memory in memories:
+            lines.append(
+                f"- `{memory['id']}` ({memory['kind']}): {str(memory['content'])[:240]}"
+            )
+        return lines
 
     @staticmethod
     def _tests(nodes: list[Node]) -> list[str]:

@@ -15,16 +15,13 @@ class PdfExtractor(TextExtractor):
 
             reader = PdfReader(str(path))
             text = "\n".join(page.extract_text() or "" for page in reader.pages)
-            temp = path.with_suffix(path.suffix + ".txt")
-            temp.write_text(text, encoding="utf-8")
-            try:
-                result = super().extract(root, temp)
-                result.file.path = path.relative_to(root).as_posix()
-                result.file.absolute_path = str(path.resolve())
-                result.warnings.append("PDF text extracted via optional pypdf dependency.")
-                return result
-            finally:
-                temp.unlink(missing_ok=True)
+            return self.extract_text(
+                root,
+                path,
+                text,
+                language="pdf",
+                warnings=["PDF text extracted via optional pypdf dependency."],
+            )
         except Exception:
             result = ExtractionResult(
                 file=self._stub_file(root, path),

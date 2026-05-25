@@ -1,4 +1,15 @@
-import { RefreshCw, Search } from "lucide-react";
+import {
+  Activity,
+  BookOpen,
+  Brain,
+  Bug,
+  GitPullRequest,
+  LayoutDashboard,
+  Network,
+  RefreshCw,
+  Search,
+  type LucideIcon
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { GraphPayload, GraphStatus, ReviewResult } from "@devgraph/schema";
 import { client } from "./api/client";
@@ -9,6 +20,15 @@ import { OnboardingLens } from "./onboard/OnboardingLens";
 import { ReviewLens } from "./review/ReviewLens";
 
 type Page = "overview" | "graph" | "review" | "debug" | "onboard" | "knowledge";
+
+const navItems: Array<{ id: Page; label: string; icon: LucideIcon }> = [
+  { id: "overview", label: "Overview", icon: LayoutDashboard },
+  { id: "graph", label: "Graph", icon: Network },
+  { id: "review", label: "Review", icon: GitPullRequest },
+  { id: "debug", label: "Debug", icon: Bug },
+  { id: "onboard", label: "Onboard", icon: BookOpen },
+  { id: "knowledge", label: "Knowledge", icon: Brain }
+];
 
 export function App() {
   const [page, setPage] = useState<Page>("overview");
@@ -56,12 +76,19 @@ export function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand">DevGraph OS</div>
-        {(["overview", "graph", "review", "debug", "onboard", "knowledge"] as Page[]).map((item) => (
-          <button key={item} className={page === item ? "nav-item active" : "nav-item"} onClick={() => setPage(item)}>
-            {item}
+        <div className="brand">
+          <Activity size={19} />
+          <span>DevGraph OS</span>
+        </div>
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          return (
+          <button key={item.id} className={page === item.id ? "nav-item active" : "nav-item"} onClick={() => setPage(item.id)}>
+            <Icon size={16} />
+            <span>{item.label}</span>
           </button>
-        ))}
+          );
+        })}
       </aside>
 
       <main className="main">
@@ -97,16 +124,39 @@ export function App() {
 function Overview({ status, graph }: { status: GraphStatus | null; graph: GraphPayload }) {
   const languageRows = Object.entries(status?.languages ?? {});
   const riskyNodes = graph.nodes.filter((node) => node.type === "api_endpoint" || node.type === "schema").slice(0, 8);
+  const extracted = graph.nodes.filter((node) => node.confidence_tier === "extracted").length;
+  const inferred = graph.nodes.filter((node) => node.confidence_tier === "inferred").length;
+  const graphDensity = graph.nodes.length ? Math.round((graph.edges.length / graph.nodes.length) * 100) / 100 : 0;
+  const maxLanguageCount = Math.max(...languageRows.map(([, count]) => count), 1);
   return (
     <section className="overview-grid">
       <Metric label="Files" value={status?.total_files ?? 0} />
       <Metric label="Nodes" value={status?.total_nodes ?? 0} />
       <Metric label="Edges" value={status?.total_edges ?? 0} />
       <Metric label="Chunks" value={status?.total_chunks ?? 0} />
+      <section className="signal-panel">
+        <div>
+          <span>Parser confidence</span>
+          <strong>{extracted}</strong>
+          <small>extracted facts</small>
+        </div>
+        <div className="pulse-ring" aria-hidden="true" />
+        <div>
+          <span>Graph density</span>
+          <strong>{graphDensity}</strong>
+          <small>{inferred} inferred nodes</small>
+        </div>
+      </section>
       <section className="panel wide">
         <h2>Languages</h2>
-        <div className="list">
-          {languageRows.length ? languageRows.map(([language, count]) => <span key={language}>{language}: {count}</span>) : <span>No language data</span>}
+        <div className="language-list">
+          {languageRows.length ? languageRows.map(([language, count]) => (
+            <div className="language-row" key={language}>
+              <span>{language}</span>
+              <div><i style={{ width: `${Math.max(8, (count / maxLanguageCount) * 100)}%` }} /></div>
+              <strong>{count}</strong>
+            </div>
+          )) : <span>No language data</span>}
         </div>
       </section>
       <section className="panel wide">
@@ -127,4 +177,3 @@ function Metric({ label, value }: { label: string; value: number }) {
     </section>
   );
 }
-

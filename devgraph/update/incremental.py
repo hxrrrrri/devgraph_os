@@ -10,7 +10,7 @@ from devgraph.config import DevGraphConfig
 from devgraph.core.graph_store import GraphStore
 from devgraph.extractors.registry import ExtractorRegistry, classify_file
 from devgraph.update.fingerprints import file_hash
-from devgraph.update.git import changed_files
+from devgraph.update.git import changed_files, diff_patch
 from devgraph.update.ignore import IgnoreMatcher
 
 
@@ -56,6 +56,12 @@ def build_graph(root: Path, config: DevGraphConfig, store: GraphStore, force: bo
         stats.warnings.extend(result.warnings)
         store.replace_file_graph(result.file, result.nodes, result.edges, result.chunks)
         stats.indexed += 1
+    if stats.indexed:
+        store.refresh_inferred_relationships()
+        store.create_snapshot(
+            "latest",
+            {"operation": "build", "indexed": stats.indexed, "scanned": stats.scanned},
+        )
     return stats
 
 
@@ -74,6 +80,14 @@ def update_graph(
     for change in changes:
         path = root / change.path
         stats.scanned += 1
+        store.record_change(
+            file_path=change.path,
+            status=change.status,
+            patch=change.patch or diff_patch(root, change.path, base=base, staged=staged),
+            base_ref=base,
+            staged=staged,
+            metadata={"operation": "update"},
+        )
         if not path.exists() or change.status.upper().startswith("D"):
             store.mark_file_deleted(change.path)
             stats.deleted += 1
@@ -86,6 +100,19 @@ def update_graph(
         stats.warnings.extend(result.warnings)
         store.replace_file_graph(result.file, result.nodes, result.edges, result.chunks)
         stats.indexed += 1
+    if stats.indexed or stats.deleted:
+        store.refresh_inferred_relationships()
+        store.create_snapshot(
+            "latest",
+            {
+                "operation": "update",
+                "indexed": stats.indexed,
+                "deleted": stats.deleted,
+                "scanned": stats.scanned,
+                "base": base,
+                "staged": staged,
+            },
+        )
     return stats
 
 

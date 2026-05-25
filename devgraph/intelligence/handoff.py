@@ -27,8 +27,13 @@ class HandoffEngine:
             "recent_commits": recent_commits(self.root),
             "graph_freshness": status.last_indexed_at,
             "recent_devgraph_sessions": self.store.recent_sessions(),
+            "recent_changes": self.store.recent_changes(),
+            "project_memories": self.store.list_memories(limit=20),
             "open_tasks": [],
-            "accepted_decisions": [],
+            "accepted_decisions": [
+                memory["content"]
+                for memory in self.store.list_memories(kind="decision", limit=20)
+            ],
             "rejected_attempts": [],
             "known_failing_tests": [],
             "recommended_next_step": "Run `devgraph status`, then `devgraph review` if files changed.",
@@ -54,6 +59,17 @@ class HandoffEngine:
                 _lines_or_empty(
                     [f"- {commit}" for commit in payload["recent_commits"]],
                     "No git commits detected.",
+                )
+            ),
+            "",
+            "## Project memories",
+            *(
+                _lines_or_empty(
+                    [
+                        f"- `{memory['id']}` [{memory['kind']}] {memory['content']}"
+                        for memory in payload["project_memories"]
+                    ],
+                    "No project memories recorded.",
                 )
             ),
             "",

@@ -48,7 +48,10 @@ def init_project(
 ) -> None:
     """Initialize DevGraph OS in the current project."""
     root = Path.cwd()
-    created = ensure_project(root, platform=platform)
+    try:
+        created = ensure_project(root, platform=platform)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     if created:
         typer.echo("Created:")
         for path in created:
@@ -144,15 +147,22 @@ def trace(query: str) -> None:
     typer.echo(json.dumps(trace_flow(store, query), indent=2))
 
 
-@app.command("review")
+@app.command("review", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def review(
+    ctx: typer.Context,
     base: str | None = typer.Option(None, "--base", help="Diff base ref, for example origin/main."),
     staged: bool = typer.Option(False, "--staged", help="Review staged changes."),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+    files: list[str] | None = typer.Option(
+        None,
+        "--files",
+        help="Scope review to one or more files. Repeat the option or pass extra paths after it.",
+    ),
 ) -> None:
     """Produce risk-scored review context."""
     root, config, store = _context()
-    result = ReviewEngine(root, config, store).review(base=base, staged=staged)
+    scoped_files = [*(files or []), *ctx.args]
+    result = ReviewEngine(root, config, store).review(base=base, staged=staged, files=scoped_files)
     if json_output:
         typer.echo(json.dumps(result.model_dump(mode="json"), indent=2))
     else:
@@ -204,6 +214,46 @@ def ingest(target: Path) -> None:
     typer.echo(f"Ingested {result.file.path}")
 
 
+@app.command("remember")
+def remember(
+    content: str = typer.Argument(..., help="Memory content to store."),
+    kind: str = typer.Option("note", "--kind", help="Memory kind, such as decision, constraint, or task."),
+) -> None:
+    """Store a user-approved project memory without secret values."""
+    _root, _config, store = _context()
+    memory_id = store.remember(kind=kind, content=content)
+    typer.echo(memory_id)
+
+
+@app.command("memories")
+def memories(
+    kind: str | None = typer.Option(None, "--kind", help="Filter by memory kind."),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+) -> None:
+    """List user-approved project memories."""
+    _root, _config, store = _context()
+    rows = store.list_memories(kind=kind)
+    if json_output:
+        typer.echo(json.dumps(rows, indent=2))
+        return
+    if not rows:
+        typer.echo("No memories recorded.")
+        return
+    for row in rows:
+        typer.echo(f"{row['id']} [{row['kind']}] {row['content']}")
+
+
+@app.command("forget")
+def forget(memory_id: str = typer.Argument(..., help="Memory id returned by devgraph remember.")) -> None:
+    """Delete a project memory."""
+    _root, _config, store = _context()
+    if store.forget_memory(memory_id):
+        typer.echo(f"Forgot {memory_id}")
+        return
+    typer.echo(f"Memory not found: {memory_id}")
+    raise typer.Exit(code=1)
+
+
 @app.command("handoff")
 def handoff() -> None:
     """Generate session handoff context."""
@@ -250,7 +300,7 @@ def mcp() -> None:
 
 
 @app.command("doctor")
-def doctor() -> None:
+def doctor(json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON.")) -> None:
     """Detect local configuration and privacy issues."""
     root, config, store = _context()
     issues = []
@@ -261,6 +311,15 @@ def doctor() -> None:
     status_value = store.get_status(config.project.name)
     if status_value.total_nodes == 0:
         issues.append("Graph has no nodes. Run `devgraph build`.")
+    payload = {
+        "project_root": str(root),
+        "issues": issues,
+        "status": status_value.model_dump(),
+        "privacy": config.privacy.model_dump(),
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2))
+        return
     typer.echo(f"Project root: {root}")
     if issues:
         typer.echo("Issues:")

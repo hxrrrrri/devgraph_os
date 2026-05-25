@@ -17,6 +17,9 @@
     "onCommand:devgraph.explainCurrentFile",
     "onCommand:devgraph.explainSelection",
     "onCommand:devgraph.ask",
+    "onCommand:devgraph.doctor",
+    "onCommand:devgraph.rememberDecision",
+    "onCommand:devgraph.showMemories",
     "onCommand:devgraph.openDashboard",
     "onCommand:devgraph.handoff"
   ],
@@ -30,6 +33,9 @@
       { "command": "devgraph.explainCurrentFile", "title": "DevGraph: Explain Current File" },
       { "command": "devgraph.explainSelection", "title": "DevGraph: Explain Symbol" },
       { "command": "devgraph.ask", "title": "DevGraph: Ask About Project" },
+      { "command": "devgraph.doctor", "title": "DevGraph: Run Doctor" },
+      { "command": "devgraph.rememberDecision", "title": "DevGraph: Remember Decision" },
+      { "command": "devgraph.showMemories", "title": "DevGraph: Show Memories" },
       { "command": "devgraph.openDashboard", "title": "DevGraph: Open Dashboard" },
       { "command": "devgraph.handoff", "title": "DevGraph: Generate Handoff" }
     ],
@@ -68,6 +74,18 @@
           "command": "devgraph.reviewChanges",
           "group": "navigation"
         }
+      ],
+      "view/title": [
+        {
+          "command": "devgraph.doctor",
+          "when": "view == devgraph.statusView",
+          "group": "navigation"
+        },
+        {
+          "command": "devgraph.showMemories",
+          "when": "view == devgraph.statusView",
+          "group": "navigation"
+        }
       ]
     }
   },
@@ -82,4 +100,3 @@
     "typescript": "^5.6.3"
   }
 }
-

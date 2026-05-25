@@ -18,3 +18,12 @@
 
 Every node and edge stores its confidence tier. Deterministic facts and model-generated claims must not be mixed without labeling.
 
+## Supporting Tables
+
+- `files`: indexed file records, deletion state, hash, language, and freshness.
+- `chunks`: retrievable source/docs/config excerpts with token estimates.
+- `changes`: local git change metadata recorded during incremental updates.
+- `snapshots`: local JSON graph snapshots produced by builds and updates.
+- `sessions`: generated review/handoff/onboarding sessions.
+- `memories`: explicit user-approved project memories, with secret-like values redacted before storage.
+- `provenance`: source path, lines, confidence tier, and metadata for extracted graph entities.

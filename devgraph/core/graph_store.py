@@ -10,6 +10,7 @@ from typing import Any
 
 import networkx as nx
 
+from devgraph.constants import SECRET_KEY_HINTS
 from devgraph.core.ids import stable_hash
 from devgraph.core.migrations import run_migrations
 from devgraph.core.schema import Chunk, Edge, FileRecord, GraphStatus, Node, utc_now
@@ -213,13 +214,47 @@ class GraphStore:
         )
         self.connection.execute("DELETE FROM chunks WHERE file_path = ?", (record.path,))
         self.connection.execute("DELETE FROM edges WHERE file_path = ?", (record.path,))
+        self.connection.execute("DELETE FROM provenance WHERE source_path = ?", (record.path,))
         self.upsert_file(record)
         for node in nodes:
             self.upsert_node(node)
+            self.record_provenance(
+                entity_id=node.id,
+                entity_type="node",
+                source="extractor",
+                source_path=record.path,
+                line_start=node.line_start,
+                line_end=node.line_end,
+                confidence_tier=node.confidence_tier,
+                metadata={"node_type": node.type, "qualified_name": node.qualified_name},
+                commit=False,
+            )
         for edge in edges:
             self.upsert_edge(edge)
+            self.record_provenance(
+                entity_id=edge.id,
+                entity_type="edge",
+                source=edge.provenance_source,
+                source_path=edge.file_path or record.path,
+                line_start=edge.line,
+                line_end=edge.line,
+                confidence_tier=edge.confidence_tier,
+                metadata={"edge_type": edge.type},
+                commit=False,
+            )
         for chunk in chunks:
             self.upsert_chunk(chunk)
+            self.record_provenance(
+                entity_id=chunk.id,
+                entity_type="chunk",
+                source="extractor",
+                source_path=chunk.file_path,
+                line_start=chunk.line_start,
+                line_end=chunk.line_end,
+                confidence_tier="extracted",
+                metadata={"kind": chunk.kind, "node_id": chunk.node_id},
+                commit=False,
+            )
         self.connection.commit()
 
     def mark_file_deleted(self, path: str) -> None:
@@ -251,6 +286,7 @@ class GraphStore:
             (path,),
         )
         self.connection.execute("DELETE FROM chunks WHERE file_path = ?", (path,))
+        self.connection.execute("DELETE FROM provenance WHERE source_path = ?", (path,))
         self.connection.execute(
             "UPDATE files SET is_deleted = 1, last_indexed_at = ? WHERE path = ?",
             (now, path),
@@ -403,6 +439,19 @@ class GraphStore:
             frontier = next_frontier
         return list(impacted.values())[:limit]
 
+    def tests_for_nodes(self, node_ids: list[str], limit: int = 100) -> list[Node]:
+        if not node_ids:
+            return []
+        placeholders = ",".join("?" for _ in node_ids)
+        rows = self.connection.execute(
+            "SELECT DISTINCT n.* FROM edges e "
+            "JOIN nodes n ON n.id = e.target_id "
+            f"WHERE e.type = 'tested_by' AND e.source_id IN ({placeholders}) "
+            "ORDER BY n.file_path, n.line_start LIMIT ?",
+            [*node_ids, limit],
+        ).fetchall()
+        return [self._row_to_node(row) for row in rows]
+
     def find_path(self, source_query: str, target_query: str, cutoff: int = 6) -> list[Node]:
         source = self.find_nodes(source_query, limit=1)
         target = self.find_nodes(target_query, limit=1)
@@ -440,11 +489,221 @@ class GraphStore:
         self.connection.commit()
         return session_id
 
+    def record_change(
+        self,
+        file_path: str,
+        status: str,
+        patch: str = "",
+        base_ref: str | None = None,
+        staged: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        now = utc_now()
+        change_id = f"change:{stable_hash(base_ref or '', staged, file_path, status, patch, now, length=24)}"
+        self.connection.execute(
+            """
+            INSERT INTO changes(id, base_ref, staged, file_path, status, patch, changed_at, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                change_id,
+                base_ref,
+                int(staged),
+                file_path,
+                status,
+                patch,
+                now,
+                json.dumps(metadata or {}, sort_keys=True),
+            ),
+        )
+        self.connection.commit()
+        return change_id
+
+    def recent_changes(self, limit: int = 25) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            "SELECT * FROM changes ORDER BY changed_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def remember(
+        self,
+        kind: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+        session_id: str | None = None,
+    ) -> str:
+        redacted, did_redact = _redact_secret_like(content)
+        now = utc_now()
+        memory_id = f"memory:{stable_hash(kind, redacted, now, length=24)}"
+        memory_metadata = dict(metadata or {})
+        memory_metadata["redacted_secret_like_content"] = did_redact
+        self.connection.execute(
+            """
+            INSERT INTO memories(id, session_id, kind, content, confidence_tier, created_at, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                memory_id,
+                session_id,
+                kind,
+                redacted,
+                "user",
+                now,
+                json.dumps(memory_metadata, sort_keys=True),
+            ),
+        )
+        self.connection.commit()
+        return memory_id
+
+    def list_memories(self, kind: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        if kind:
+            rows = self.connection.execute(
+                "SELECT * FROM memories WHERE kind = ? ORDER BY created_at DESC LIMIT ?",
+                (kind, limit),
+            ).fetchall()
+        else:
+            rows = self.connection.execute(
+                "SELECT * FROM memories ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [_decode_json_metadata(row) for row in rows]
+
+    def relevant_memories(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        if not query.strip():
+            return self.list_memories(limit=limit)
+        terms = [term for term in query.lower().split() if len(term) > 2][:6]
+        if not terms:
+            return self.list_memories(limit=limit)
+        clauses = " OR ".join(["lower(content) LIKE ? OR lower(kind) LIKE ?" for _ in terms])
+        params: list[Any] = []
+        for term in terms:
+            like = f"%{term}%"
+            params.extend([like, like])
+        rows = self.connection.execute(
+            f"SELECT * FROM memories WHERE {clauses} ORDER BY created_at DESC LIMIT ?",
+            [*params, limit],
+        ).fetchall()
+        return [_decode_json_metadata(row) for row in rows]
+
+    def forget_memory(self, memory_id: str) -> bool:
+        cursor = self.connection.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+        self.connection.commit()
+        return cursor.rowcount > 0
+
     def recent_sessions(self, limit: int = 10) -> list[dict[str, Any]]:
         rows = self.connection.execute(
             "SELECT * FROM sessions ORDER BY updated_at DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def record_provenance(
+        self,
+        entity_id: str,
+        entity_type: str,
+        source: str,
+        source_path: str | None,
+        line_start: int | None = None,
+        line_end: int | None = None,
+        confidence_tier: str = "extracted",
+        metadata: dict[str, Any] | None = None,
+        commit: bool = True,
+    ) -> str:
+        provenance_id = f"provenance:{stable_hash(entity_id, source, source_path, line_start, line_end, length=24)}"
+        self.connection.execute(
+            """
+            INSERT INTO provenance(
+                id, entity_id, entity_type, source, source_path, line_start, line_end,
+                confidence_tier, metadata, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                confidence_tier=excluded.confidence_tier,
+                metadata=excluded.metadata
+            """,
+            (
+                provenance_id,
+                entity_id,
+                entity_type,
+                source,
+                source_path,
+                line_start,
+                line_end,
+                confidence_tier,
+                json.dumps(metadata or {}, sort_keys=True),
+                utc_now(),
+            ),
+        )
+        if commit:
+            self.connection.commit()
+        return provenance_id
+
+    def provenance_for_entity(self, entity_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            "SELECT * FROM provenance WHERE entity_id = ? ORDER BY created_at DESC LIMIT ?",
+            (entity_id, limit),
+        ).fetchall()
+        return [_decode_json_metadata(row) for row in rows]
+
+    def create_snapshot(self, name: str, metadata: dict[str, Any] | None = None) -> Path:
+        safe_name = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in name)
+        target = self.storage_path / "snapshots" / f"{safe_name}.json"
+        self.write_json_export(target)
+        snapshot_id = f"snapshot:{stable_hash(name, utc_now(), length=24)}"
+        self.connection.execute(
+            "INSERT INTO snapshots(id, name, created_at, metadata) VALUES (?, ?, ?, ?)",
+            (snapshot_id, name, utc_now(), json.dumps(metadata or {}, sort_keys=True)),
+        )
+        self.connection.commit()
+        return target
+
+    def refresh_inferred_relationships(self) -> None:
+        self.connection.execute(
+            "DELETE FROM edges WHERE confidence_tier = 'inferred' AND type = 'tested_by'"
+        )
+        tests = [
+            self._row_to_node(row)
+            for row in self.connection.execute("SELECT * FROM nodes WHERE type = 'test'").fetchall()
+        ]
+        subjects = [
+            self._row_to_node(row)
+            for row in self.connection.execute(
+                "SELECT * FROM nodes WHERE type IN ('function', 'class', 'api_endpoint', 'module')"
+            ).fetchall()
+        ]
+        for test in tests:
+            normalized_test_name = _normalize_test_name(test.name)
+            test_path = (test.file_path or "").lower()
+            for subject in subjects:
+                if subject.id == test.id or subject.type == "test":
+                    continue
+                subject_name = subject.name.lower()
+                if not subject_name or len(subject_name) < 3:
+                    continue
+                subject_path = Path(subject.file_path) if subject.file_path else None
+                test_path_obj = Path(test.file_path or "")
+                same_area = bool(
+                    subject_path
+                    and (
+                        subject_path.parts[:1] == test_path_obj.parts[:1]
+                        or subject_path.stem.lower() in test_path
+                    )
+                )
+                name_match = subject_name in normalized_test_name or subject_name in test_path
+                if not (name_match and same_area):
+                    continue
+                edge = Edge(
+                    id=f"edge:{stable_hash(subject.id, test.id, 'tested_by', 'test-convention', length=24)}",
+                    source_id=subject.id,
+                    target_id=test.id,
+                    type="tested_by",
+                    confidence=0.7,
+                    confidence_tier="inferred",
+                    provenance_source="test-convention",
+                    file_path=test.file_path,
+                    line=test.line_start,
+                    metadata={"reason": "test name or path references subject name"},
+                )
+                self.upsert_edge(edge)
+        self.connection.commit()
 
     def write_json_export(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -453,6 +712,9 @@ class GraphStore:
             "nodes": [dict(row) for row in self.connection.execute("SELECT * FROM nodes").fetchall()],
             "edges": [dict(row) for row in self.connection.execute("SELECT * FROM edges").fetchall()],
             "chunks": [dict(row) for row in self.connection.execute("SELECT * FROM chunks").fetchall()],
+            "memories": [dict(row) for row in self.connection.execute("SELECT * FROM memories").fetchall()],
+            "changes": [dict(row) for row in self.connection.execute("SELECT * FROM changes").fetchall()],
+            "sessions": [dict(row) for row in self.connection.execute("SELECT * FROM sessions").fetchall()],
         }
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -567,3 +829,40 @@ class GraphStore:
         data = dict(row)
         data["metadata"] = json.loads(data.get("metadata") or "{}")
         return Chunk(**data)
+
+
+def _decode_json_metadata(row: sqlite3.Row) -> dict[str, Any]:
+    data = dict(row)
+    data["metadata"] = json.loads(data.get("metadata") or "{}")
+    return data
+
+
+def _redact_secret_like(content: str) -> tuple[str, bool]:
+    redacted_lines: list[str] = []
+    did_redact = False
+    for line in content.splitlines() or [content]:
+        lower = line.lower()
+        if any(hint in lower for hint in SECRET_KEY_HINTS):
+            did_redact = True
+            if "=" in line:
+                key = line.split("=", 1)[0].strip()
+                redacted_lines.append(f"{key}=<redacted>")
+            elif ":" in line:
+                key = line.split(":", 1)[0].strip()
+                redacted_lines.append(f"{key}: <redacted>")
+            else:
+                redacted_lines.append("<redacted secret-like memory>")
+        else:
+            redacted_lines.append(line)
+    return "\n".join(redacted_lines), did_redact
+
+
+def _normalize_test_name(name: str) -> str:
+    lower = name.lower()
+    for prefix in ("test_", "test", "should_"):
+        if lower.startswith(prefix):
+            lower = lower.removeprefix(prefix)
+    for suffix in ("_test", "test", "_spec", "spec"):
+        if lower.endswith(suffix):
+            lower = lower.removesuffix(suffix)
+    return lower.replace("_", "").replace("-", "")

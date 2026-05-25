@@ -156,10 +156,12 @@ class ReviewResult(BaseModel):
     impacted_files: list[str] = Field(default_factory=list)
     affected_tests: list[str] = Field(default_factory=list)
     missing_tests: list[str] = Field(default_factory=list)
+    diff_summary: list[str] = Field(default_factory=list)
+    changed_snippets: dict[str, str] = Field(default_factory=dict)
     risk_score: int
     risk_level: str
     risk_explanation: list[str]
     review_checklist: list[str]
     context_pack: str
     suggested_commands: list[str]
-
+    warnings: list[str] = Field(default_factory=list)

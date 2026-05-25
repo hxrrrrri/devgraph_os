@@ -6,8 +6,9 @@ The context engine follows this flow:
 2. Find seed nodes by exact match and SQLite FTS.
 3. Expand the graph around seed nodes.
 4. Include docs, configs, tests, and source chunks when relevant.
-5. Rank by match quality, graph confidence, and graph distance.
-6. Pack results into the selected token budget.
+5. Add user-approved memories and diff snippets when the workflow provides them.
+6. Rank by match quality, graph confidence, and graph distance.
+7. Pack results into the selected token budget.
 
 Budgets:
 
@@ -28,8 +29,8 @@ Context packs use this structure:
 ## Graph paths
 ## Changed code snippets
 ## Tests
+## Project memories
 ## Docs/configs
 ## Risks / uncertainty
 ## Suggested next actions
 ```
-

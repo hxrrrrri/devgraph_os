@@ -27,3 +27,10 @@ Default storage:
 
 Neo4j is not required. It is available only as an export format.
 
+## Current parser boundary
+
+Python extraction uses the standard-library AST. JavaScript and TypeScript use conservative pattern extraction for imports, symbols, calls, and common route declarations. Go, Rust, and Java now have deterministic symbol/import extraction, but deeper semantic analysis still belongs behind the Tree-sitter adapter boundary and remains optional/local. PDF and Office extraction use optional local dependencies and never write extracted temporary text beside source documents.
+
+## Local intelligence
+
+Builds and updates record provenance rows for extracted nodes, edges, and chunks. Incremental updates record changed-file metadata, mark deleted files, refresh inferred `tested_by` edges from naming conventions, and write a latest JSON snapshot. Memories are explicit user-approved records stored locally; secret-looking values are redacted before persistence.

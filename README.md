@@ -34,7 +34,10 @@ devgraph path AuthService DatabasePool
 devgraph trace AuthService.login
 devgraph review --base origin/main
 devgraph review --staged
+devgraph review --files src/auth.py src/server.ts
 devgraph debug "TypeError in src/auth/login.ts line 42"
+devgraph remember --kind decision "We use SQLite as the local graph store."
+devgraph memories
 devgraph onboard
 devgraph handoff
 devgraph export --format json
@@ -49,11 +52,11 @@ Start the MCP server:
 devgraph mcp
 ```
 
-The server exposes a compact tool surface including `build_or_update_graph`, `get_project_status`, `get_context`, `review_changes`, `explain`, `query_graph`, and `handoff_session`. See [docs/MCP.md](docs/MCP.md).
+The server exposes a compact tool surface including `build_or_update_graph`, `get_project_status`, `doctor`, `get_context`, `review_changes`, `explain`, `query_graph`, memory tools, and `handoff_session`. See [docs/MCP.md](docs/MCP.md).
 
 ## VS Code Extension
 
-The extension in `apps/vscode-extension` initially shells out to the local `devgraph` CLI. It contributes command palette actions for initialize, build, update, review, explain, ask, dashboard, and handoff. See [docs/VSCODE_EXTENSION.md](docs/VSCODE_EXTENSION.md).
+The extension in `apps/vscode-extension` shells out to the local `devgraph` CLI. It contributes command palette actions for initialize, build, update, review, explain, ask, doctor, memory capture, dashboard, and handoff. See [docs/VSCODE_EXTENSION.md](docs/VSCODE_EXTENSION.md).
 
 ## Dashboard
 
@@ -63,7 +66,7 @@ The dashboard in `apps/dashboard` is a Vite/React app backed by the local HTTP s
 devgraph dashboard
 ```
 
-Screenshot placeholders are tracked in [docs/EXAMPLES.md](docs/EXAMPLES.md) until the visual design stabilizes.
+The dashboard includes graph visualization, review, debug, onboarding, and knowledge lenses backed by local HTTP APIs.
 
 ## Architecture
 
@@ -90,4 +93,3 @@ DevGraph OS is local-first by default:
 ## Roadmap
 
 The first implementation focuses on a usable local graph, review context, MCP tools, dashboard shell, and VS Code shell. Future work expands Tree-sitter coverage, semantic embeddings, richer flow detection, multi-repo graphs, and optional managed collaboration workflows. See [docs/ROADMAP.md](docs/ROADMAP.md).
-

@@ -11,6 +11,9 @@ export function registerDevGraphCommands(context: vscode.ExtensionContext, refre
     vscode.commands.registerCommand("devgraph.explainCurrentFile", () => explainCurrentFile()),
     vscode.commands.registerCommand("devgraph.explainSelection", () => explainSelection()),
     vscode.commands.registerCommand("devgraph.ask", () => askProject()),
+    vscode.commands.registerCommand("devgraph.doctor", () => runAndShow(["doctor", "--json"], refresh)),
+    vscode.commands.registerCommand("devgraph.rememberDecision", () => rememberDecision(refresh)),
+    vscode.commands.registerCommand("devgraph.showMemories", () => runAndShow(["memories"], refresh)),
     vscode.commands.registerCommand("devgraph.openDashboard", () => openDashboard()),
     vscode.commands.registerCommand("devgraph.handoff", () => runAndShow(["handoff"], refresh))
   );
@@ -41,6 +44,12 @@ async function askProject(): Promise<void> {
   await runAndShow(["ask", question]);
 }
 
+async function rememberDecision(refresh: () => void): Promise<void> {
+  const decision = await vscode.window.showInputBox({ prompt: "Remember a DevGraph decision" });
+  if (!decision) return;
+  await runAndShow(["remember", "--kind", "decision", decision], refresh);
+}
+
 async function runAndShow(args: string[], refresh?: () => void): Promise<void> {
   try {
     const output = await vscode.window.withProgress(
@@ -54,4 +63,3 @@ async function runAndShow(args: string[], refresh?: () => void): Promise<void> {
     vscode.window.showErrorMessage(err instanceof Error ? err.message : "DevGraph command failed.");
   }
 }
-

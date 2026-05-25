@@ -32,6 +32,22 @@ class DevGraphMcpTools:
     def get_project_status(self) -> dict[str, Any]:
         return self.store.get_status(self.config.project.name).model_dump()
 
+    def doctor(self) -> dict[str, Any]:
+        status = self.store.get_status(self.config.project.name)
+        issues: list[str] = []
+        if self.config.privacy.allow_llm_enrichment:
+            issues.append("LLM enrichment is enabled. Confirm external model privacy settings before use.")
+        if self.config.privacy.store_env_values:
+            issues.append("store_env_values is enabled. This can persist secrets and is not recommended.")
+        if status.total_nodes == 0:
+            issues.append("Graph has no nodes. Run `devgraph build`.")
+        return {
+            "project_root": str(self.root),
+            "issues": issues,
+            "status": status.model_dump(),
+            "privacy": self.config.privacy.model_dump(),
+        }
+
     def get_context(
         self,
         task_type: str,
@@ -49,8 +65,15 @@ class DevGraphMcpTools:
         )
         return {"context_pack": pack}
 
-    def review_changes(self, base: str | None = None, staged: bool = False) -> dict[str, Any]:
-        return ReviewEngine(self.root, self.config, self.store).review(base=base, staged=staged).model_dump(mode="json")
+    def review_changes(
+        self,
+        base: str | None = None,
+        staged: bool = False,
+        files: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return ReviewEngine(self.root, self.config, self.store).review(
+            base=base, staged=staged, files=files
+        ).model_dump(mode="json")
 
     def debug_issue(self, issue: str) -> dict[str, Any]:
         return {"context_pack": DebugEngine(self.store).debug(issue)}
@@ -78,6 +101,16 @@ class DevGraphMcpTools:
         markdown, data = HandoffEngine(self.root, self.config, self.store).generate()
         return {"markdown": str(markdown), "json": str(data)}
 
+    def remember(self, kind: str, content: str) -> dict[str, Any]:
+        memory_id = self.store.remember(kind=kind, content=content)
+        return {"id": memory_id}
+
+    def list_memories(self, kind: str | None = None, limit: int = 50) -> dict[str, Any]:
+        return {"memories": self.store.list_memories(kind=kind, limit=limit)}
+
+    def forget_memory(self, memory_id: str) -> dict[str, Any]:
+        return {"deleted": self.store.forget_memory(memory_id)}
+
 
 def run_mcp_server(root: Path | None = None) -> None:
     tools = DevGraphMcpTools(root)
@@ -89,6 +122,7 @@ def run_mcp_server(root: Path | None = None) -> None:
     server = FastMCP("devgraph-os")
     server.tool()(tools.build_or_update_graph)
     server.tool()(tools.get_project_status)
+    server.tool()(tools.doctor)
     server.tool()(tools.get_context)
     server.tool()(tools.review_changes)
     server.tool()(tools.debug_issue)
@@ -99,4 +133,7 @@ def run_mcp_server(root: Path | None = None) -> None:
     server.tool()(tools.search)
     server.tool()(tools.generate_onboarding)
     server.tool()(tools.handoff_session)
+    server.tool()(tools.remember)
+    server.tool()(tools.list_memories)
+    server.tool()(tools.forget_memory)
     server.run()

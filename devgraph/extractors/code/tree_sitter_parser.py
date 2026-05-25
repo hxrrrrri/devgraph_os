@@ -11,10 +11,10 @@ import ast
 import re
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from devgraph.core.ids import edge_id, node_id, normalize_path
-from devgraph.core.schema import Edge, ExtractionResult, Node
+from devgraph.core.schema import Edge, ExtractionResult, Node, NodeType
 from devgraph.extractors.base import (
     BaseExtractor,
     contains_edge,
@@ -41,6 +41,10 @@ class CodeExtractor(BaseExtractor):
             nodes, edges, warnings = self._extract_python(record.path, text, file_node)
         elif language in {"javascript", "typescript"}:
             nodes, edges, warnings = self._extract_js_ts(record.path, text, file_node, language)
+        elif language in {"go", "rust", "java"}:
+            nodes, edges, warnings = self._extract_static_language(
+                record.path, text, file_node, language
+            )
         else:
             nodes, edges, warnings = self._extract_generic_code(record.path, text, file_node, language)
         all_nodes = [file_node, *nodes]
@@ -294,6 +298,89 @@ class CodeExtractor(BaseExtractor):
             )
         return _dedupe_nodes(nodes), _dedupe_edges(edges), []
 
+    def _extract_static_language(
+        self,
+        file_path: str,
+        text: str,
+        file_node: Node,
+        language: str,
+    ) -> tuple[list[Node], list[Edge], list[str]]:
+        module_name = normalize_path(file_path).replace("/", ".")
+        module_node = Node(
+            id=node_id("module", module_name),
+            type="module",
+            name=Path(file_path).stem,
+            qualified_name=module_name,
+            file_path=file_path,
+            line_start=1,
+            line_end=max(1, text.count("\n") + 1),
+            language=language,
+            content_hash=file_node.content_hash,
+        )
+        nodes: list[Node] = [module_node]
+        edges: list[Edge] = [
+            Edge(
+                id=edge_id(file_node.id, module_node.id, "contains", f"{language}-parser"),
+                source_id=file_node.id,
+                target_id=module_node.id,
+                type="contains",
+                provenance_source=f"{language}-parser",
+                file_path=file_path,
+                line=1,
+            )
+        ]
+        symbol_by_name: dict[str, Node] = {}
+        for name, kind, line in _language_symbols(text, language):
+            node_type = "class" if kind == "class" else ("test" if is_test_symbol(name) else "function")
+            if kind == "type":
+                node_type = "type"
+            qn = f"{module_name}::{name}"
+            node = Node(
+                id=node_id(node_type, qn),
+                type=cast(NodeType, node_type),
+                name=name,
+                qualified_name=qn,
+                file_path=file_path,
+                line_start=line,
+                line_end=line,
+                language=language,
+                content_hash=file_node.content_hash,
+                metadata={"parser": f"{language}-patterns", "kind": kind},
+            )
+            nodes.append(node)
+            symbol_by_name[name] = node
+        for module, line in _language_imports(text, language):
+            target = external_module_node(module, language)
+            nodes.append(target)
+            edges.append(
+                Edge(
+                    id=edge_id(module_node.id, target.id, "imports", f"{language}-parser:{module}"),
+                    source_id=module_node.id,
+                    target_id=target.id,
+                    type="imports",
+                    provenance_source=f"{language}-parser",
+                    file_path=file_path,
+                    line=line,
+                )
+            )
+        for call_name, line in parse_js_ts_calls(text):
+            callee = symbol_by_name.get(call_name.split(".")[-1])
+            caller = _nearest_symbol(symbol_by_name.values(), line) or module_node
+            if callee and caller.id != callee.id:
+                edges.append(
+                    Edge(
+                        id=edge_id(caller.id, callee.id, "calls", f"{language}-parser:{line}:{call_name}"),
+                        source_id=caller.id,
+                        target_id=callee.id,
+                        type="calls",
+                        provenance_source=f"{language}-parser",
+                        file_path=file_path,
+                        line=line,
+                        metadata={"call": call_name},
+                    )
+                )
+        return _dedupe_nodes(nodes), _dedupe_edges(edges), []
+
     def _extract_generic_code(
         self,
         file_path: str,
@@ -388,6 +475,80 @@ def _js_ts_symbols(text: str) -> list[tuple[str, str, int]]:
         for match in pattern.finditer(text):
             symbols.append((match.group(1), kind, _line_for_offset(offsets, match.start())))
     return sorted(symbols, key=lambda item: item[2])
+
+
+def _language_symbols(text: str, language: str) -> list[tuple[str, str, int]]:
+    if language == "go":
+        patterns = [
+            (re.compile(r"^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\(", re.MULTILINE), "function"),
+            (re.compile(r"^\s*type\s+([A-Za-z_]\w*)\s+(?:struct|interface)\b", re.MULTILINE), "type"),
+        ]
+    elif language == "rust":
+        patterns = [
+            (
+                re.compile(
+                    r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_]\w*)\s*[<(]",
+                    re.MULTILINE,
+                ),
+                "function",
+            ),
+            (
+                re.compile(
+                    r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum|trait)\s+([A-Za-z_]\w*)",
+                    re.MULTILINE,
+                ),
+                "type",
+            ),
+        ]
+    elif language == "java":
+        patterns = [
+            (
+                re.compile(r"\b(?:class|interface|enum|record)\s+([A-Za-z_]\w*)"),
+                "class",
+            ),
+            (
+                re.compile(
+                    r"^\s*(?:public|private|protected|static|final|synchronized|abstract|native|\s)+"
+                    r"[\w<>\[\], ?]+\s+([A-Za-z_]\w*)\s*\(",
+                    re.MULTILINE,
+                ),
+                "function",
+            ),
+        ]
+    else:
+        return []
+
+    offsets = _line_offsets(text)
+    symbols: list[tuple[str, str, int]] = []
+    for pattern, kind in patterns:
+        for match in pattern.finditer(text):
+            symbols.append((match.group(1), kind, _line_for_offset(offsets, match.start())))
+    return sorted({(name, kind, line) for name, kind, line in symbols}, key=lambda item: item[2])
+
+
+def _language_imports(text: str, language: str) -> list[tuple[str, int]]:
+    offsets = _line_offsets(text)
+    imports: list[tuple[str, int]] = []
+    if language == "go":
+        in_block = False
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            stripped = line.strip()
+            if stripped.startswith("import ("):
+                in_block = True
+                continue
+            if in_block and stripped == ")":
+                in_block = False
+                continue
+            if stripped.startswith("import ") or in_block:
+                for match in re.finditer(r'"([^"]+)"', stripped):
+                    imports.append((match.group(1), line_number))
+    elif language == "rust":
+        for match in re.finditer(r"^\s*use\s+([^;]+);", text, re.MULTILINE):
+            imports.append((match.group(1).strip(), _line_for_offset(offsets, match.start())))
+    elif language == "java":
+        for match in re.finditer(r"^\s*import\s+(?:static\s+)?([^;]+);", text, re.MULTILINE):
+            imports.append((match.group(1).strip(), _line_for_offset(offsets, match.start())))
+    return imports
 
 
 def _nearest_symbol(nodes: Iterable[Node], line: int) -> Node | None:
