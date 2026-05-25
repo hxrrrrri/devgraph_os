@@ -81,7 +81,13 @@
       { "command": "devgraph.openReviewReport", "title": "DevGraph: Open Review Report" },
       { "command": "devgraph.openOnboardingGuide", "title": "DevGraph: Open Onboarding Guide" },
       { "command": "devgraph.explainSymbol", "title": "DevGraph: Explain Symbol" },
-      { "command": "devgraph.reviewSymbol", "title": "DevGraph: Review Symbol Impact" }
+      { "command": "devgraph.reviewSymbol", "title": "DevGraph: Review Symbol Impact" },
+      { "command": "devgraph.showReviewPreview", "title": "DevGraph: Show Review Preview" },
+      { "command": "devgraph.showNodeDetail", "title": "DevGraph: Show Node Detail" },
+      { "command": "devgraph.showHandoffPreview", "title": "DevGraph: Show Handoff Preview" },
+      { "command": "devgraph.showGraphStatus", "title": "DevGraph: Show Graph Status" },
+      { "command": "devgraph.reviewStaged", "title": "DevGraph: Review Staged PR" },
+      { "command": "devgraph.refreshTrees", "title": "DevGraph: Refresh Trees" }
     ],
     "viewsContainers": {
       "activitybar": [
@@ -94,10 +100,10 @@
     },
     "views": {
       "devgraph": [
-        {
-          "id": "devgraph.statusView",
-          "name": "Project Graph"
-        }
+        { "id": "devgraph.statusView", "name": "Project Graph" },
+        { "id": "devgraph.changedView", "name": "Changed Files" },
+        { "id": "devgraph.impactedView", "name": "Impacted Files" },
+        { "id": "devgraph.riskyView", "name": "Risky Nodes" }
       ]
     },
     "menus": {
@@ -116,6 +122,10 @@
       "scm/title": [
         {
           "command": "devgraph.reviewChanges",
+          "group": "navigation"
+        },
+        {
+          "command": "devgraph.reviewStaged",
           "group": "navigation"
         }
       ],

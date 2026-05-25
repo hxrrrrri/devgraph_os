@@ -34,6 +34,7 @@ SUPPORTED_CODE_EXTENSIONS = {
     ".sql": "sql",
     ".vue": "vue",
     ".svelte": "svelte",
+    ".prisma": "prisma",
 }
 
 SUPPORTED_DOC_EXTENSIONS = {

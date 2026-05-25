@@ -24,6 +24,21 @@ from devgraph.extractors.base import (
     read_text,
 )
 from devgraph.extractors.code.calls import parse_js_ts_calls
+from devgraph.extractors.code.frameworks import (
+    detect_react,
+    is_component_name,
+    is_hook_name,
+    laravel_migrations,
+    laravel_models,
+    parse_alembic_ops,
+    parse_laravel_routes,
+    parse_rails_routes,
+    parse_spring_routes,
+    parse_sqlalchemy_models,
+    rails_models,
+    react_hook_calls,
+    spring_class_kinds,
+)
 from devgraph.extractors.code.imports import parse_js_ts_imports
 from devgraph.extractors.code.languages import language_for_path
 from devgraph.extractors.code.routes import (
@@ -54,6 +69,10 @@ class CodeExtractor(BaseExtractor):
                 nodes, edges, warnings = self._extract_python(record.path, text, file_node)
             nodes, edges, warnings = _with_python_routes(
                 record.path, text, file_node, nodes, edges, warnings,
+                provenance="tree-sitter" if semantic.available else "python-ast",
+            )
+            nodes, edges = _with_python_framework_overlays(
+                record.path, text, file_node, nodes, edges,
                 provenance="tree-sitter" if semantic.available else "python-ast",
             )
         elif language in {"javascript", "typescript"}:
@@ -345,7 +364,23 @@ class CodeExtractor(BaseExtractor):
             file_path, text, file_node, language, Path(file_path)
         )
         if semantic.available and any(node.type != "module" for node in semantic.nodes):
-            return semantic.nodes, semantic.edges, semantic.warnings
+            ts_module = next(
+                (node for node in semantic.nodes if node.type == "module"),
+                file_node,
+            )
+            ts_nodes: list[Node] = list(semantic.nodes)
+            ts_edges: list[Edge] = list(semantic.edges)
+            _apply_static_framework_overlays(
+                file_path=file_path,
+                text=text,
+                file_node=file_node,
+                module_node=ts_module,
+                language=language,
+                nodes=ts_nodes,
+                edges=ts_edges,
+                provenance="tree-sitter",
+            )
+            return _dedupe_nodes(ts_nodes), _dedupe_edges(ts_edges), semantic.warnings
 
         module_name = normalize_path(file_path).replace("/", ".")
         module_node = Node(
@@ -421,6 +456,16 @@ class CodeExtractor(BaseExtractor):
                         metadata={"call": call_name},
                     )
                 )
+        _apply_static_framework_overlays(
+            file_path=file_path,
+            text=text,
+            file_node=file_node,
+            module_node=module_node,
+            language=language,
+            nodes=nodes,
+            edges=edges,
+            provenance=f"{language}-parser",
+        )
         return _dedupe_nodes(nodes), _dedupe_edges(edges), []
 
     def _extract_sql(
@@ -673,6 +718,229 @@ def _with_python_routes(
     return _dedupe_nodes(nodes), _dedupe_edges(edges), warnings
 
 
+def _apply_static_framework_overlays(
+    *,
+    file_path: str,
+    text: str,
+    file_node: Node,
+    module_node: Node,
+    language: str,
+    nodes: list[Node],
+    edges: list[Edge],
+    provenance: str,
+) -> None:
+    """Attach framework metadata + route nodes for Java/Ruby/PHP."""
+
+    if language == "java":
+        kinds = spring_class_kinds(text)
+        if kinds:
+            for node in nodes:
+                if node.type == "class" and node.name in kinds:
+                    node.metadata = {
+                        **node.metadata,
+                        "framework": "spring",
+                        "kind": kinds[node.name],
+                    }
+        for method, route, line in parse_spring_routes(text):
+            _emit_route_node(
+                nodes,
+                edges,
+                file_node=file_node,
+                module_node=module_node,
+                file_path=file_path,
+                language=language,
+                method=method,
+                route=route,
+                line=line,
+                provenance=provenance,
+                framework="spring",
+            )
+    elif language == "ruby":
+        for method, route, line in parse_rails_routes(text):
+            _emit_route_node(
+                nodes,
+                edges,
+                file_node=file_node,
+                module_node=module_node,
+                file_path=file_path,
+                language=language,
+                method=method,
+                route=route,
+                line=line,
+                provenance=provenance,
+                framework="rails",
+            )
+        models = rails_models(text)
+        if models:
+            for node in nodes:
+                if node.type == "class" and node.name in models:
+                    associations = models[node.name]
+                    node.metadata = {
+                        **node.metadata,
+                        "framework": "rails",
+                        "kind": "model",
+                        "associations": [
+                            {"kind": kind, "target": target} for kind, target in associations
+                        ],
+                    }
+    elif language == "php":
+        for method, route, line in parse_laravel_routes(text):
+            _emit_route_node(
+                nodes,
+                edges,
+                file_node=file_node,
+                module_node=module_node,
+                file_path=file_path,
+                language=language,
+                method=method,
+                route=route,
+                line=line,
+                provenance=provenance,
+                framework="laravel",
+            )
+        laravel_model_names = set(laravel_models(text))
+        migrations = set(laravel_migrations(text))
+        for node in nodes:
+            if node.type != "class":
+                continue
+            if node.name in laravel_model_names:
+                node.metadata = {
+                    **node.metadata,
+                    "framework": "laravel",
+                    "kind": "eloquent_model",
+                }
+            elif node.name in migrations:
+                node.metadata = {
+                    **node.metadata,
+                    "framework": "laravel",
+                    "kind": "migration",
+                }
+
+
+def _emit_route_node(
+    nodes: list[Node],
+    edges: list[Edge],
+    *,
+    file_node: Node,
+    module_node: Node,
+    file_path: str,
+    language: str | None,
+    method: str,
+    route: str,
+    line: int,
+    provenance: str,
+    framework: str,
+) -> None:
+    qn = f"{module_node.qualified_name}::{framework}::{method} {route}"
+    route_node = Node(
+        id=node_id("api_endpoint", qn),
+        type="api_endpoint",
+        name=f"{method} {route}",
+        qualified_name=qn,
+        file_path=file_path,
+        line_start=line,
+        line_end=line,
+        language=language,
+        content_hash=file_node.content_hash,
+        metadata={
+            "method": method,
+            "path": route,
+            "parser": provenance,
+            "framework": framework,
+        },
+    )
+    nodes.append(route_node)
+    edges.append(
+        Edge(
+            id=edge_id(
+                module_node.id,
+                route_node.id,
+                "routes_to",
+                f"{provenance}:{framework}:{method}:{route}",
+            ),
+            source_id=module_node.id,
+            target_id=route_node.id,
+            type="routes_to",
+            provenance_source=provenance,
+            file_path=file_path,
+            line=line,
+        )
+    )
+
+
+def _with_python_framework_overlays(
+    file_path: str,
+    text: str,
+    file_node: Node,
+    nodes: list[Node],
+    edges: list[Edge],
+    provenance: str,
+) -> tuple[list[Node], list[Edge]]:
+    module_node = next((node for node in nodes if node.type == "module"), file_node)
+    models = parse_sqlalchemy_models(text)
+    if models:
+        models_by_name = {str(model["name"]): model for model in models}
+        for node in nodes:
+            if node.type != "class" or node.name not in models_by_name:
+                continue
+            model = models_by_name[node.name]
+            relationships_raw = model.get("relationships") or []
+            relationships_payload: list[dict[str, str]] = []
+            if isinstance(relationships_raw, list):
+                for item in relationships_raw:
+                    if isinstance(item, tuple) and len(item) == 2:
+                        relationships_payload.append(
+                            {"attribute": str(item[0]), "target": str(item[1])}
+                        )
+            node.metadata = {
+                **node.metadata,
+                "framework": "sqlalchemy",
+                "kind": "model",
+                "tablename": model.get("tablename"),
+                "columns": model.get("columns"),
+                "relationships": relationships_payload,
+            }
+    for op_name, target, line in parse_alembic_ops(text):
+        qn = f"{module_node.qualified_name}::alembic::{op_name}::{target}"
+        op_node = Node(
+            id=node_id("schema", qn),
+            type="schema",
+            name=f"{op_name} {target}",
+            qualified_name=qn,
+            file_path=file_path,
+            line_start=line,
+            line_end=line,
+            language="python",
+            content_hash=file_node.content_hash,
+            metadata={
+                "framework": "alembic",
+                "kind": "migration_op",
+                "operation": op_name,
+                "target": target,
+                "parser": provenance,
+            },
+        )
+        nodes.append(op_node)
+        edges.append(
+            Edge(
+                id=edge_id(
+                    module_node.id,
+                    op_node.id,
+                    "writes_to",
+                    f"{provenance}:alembic:{op_name}:{target}:{line}",
+                ),
+                source_id=module_node.id,
+                target_id=op_node.id,
+                type="writes_to",
+                provenance_source=provenance,
+                file_path=file_path,
+                line=line,
+                metadata={"operation": op_name, "target": target},
+            )
+        )
+    return _dedupe_nodes(nodes), _dedupe_edges(edges)
+
+
 def _python_framework(method: str) -> str:
     if method == "WEBSOCKET":
         return "fastapi"
@@ -734,7 +1002,37 @@ def _with_js_ts_routes(
             provenance=provenance,
             framework="nextjs",
         )
+    _tag_react_metadata(nodes, text)
     return _dedupe_nodes(nodes), _dedupe_edges(edges), warnings
+
+
+def _tag_react_metadata(nodes: list[Node], text: str) -> None:
+    if not detect_react(text):
+        return
+    hooks = react_hook_calls(text)
+    for node in nodes:
+        if node.type not in {"function", "class"}:
+            continue
+        kind: str | None = None
+        if is_hook_name(node.name):
+            kind = "hook"
+        elif is_component_name(node.name) and node.type in {"function", "class"}:
+            kind = "component"
+        if kind is None:
+            continue
+        node.metadata = {**node.metadata, "framework": "react", "kind": kind}
+        if kind == "component":
+            used_hooks = sorted(
+                {
+                    name
+                    for name, line in hooks
+                    if node.line_start
+                    and node.line_end
+                    and node.line_start <= line <= node.line_end
+                }
+            )
+            if used_hooks:
+                node.metadata["react_hooks"] = used_hooks
 
 
 def _add_js_ts_route_node(

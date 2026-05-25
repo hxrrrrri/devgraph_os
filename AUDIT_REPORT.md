@@ -1,6 +1,6 @@
 # DevGraph OS Audit Report
 
-Date: 2026-05-25
+Date: 2026-05-25 (v1.2 amendment appended below)
 
 | Area | Previous score | New score | Evidence |
 |---|---:|---:|---|
@@ -80,3 +80,35 @@ pnpm --filter @devgraph/vscode-extension compile
 3. Expand stale-doc detection into symbol/file claim validation.
 4. Add graph pagination and code-split dashboard chunks.
 5. Add more CI fixtures for staged/base-branch git diffs.
+
+## v1.2 amendment (2026-05-25)
+
+| Area | v1.1 score | v1.2 score | Evidence |
+|---|---:|---:|---|
+| Parser correctness | 6.5 | 8 | tree-sitter primary across 18 languages; provenance tests in `tests/unit/test_tree_sitter_provenance.py`. |
+| Framework plugins | 3 | 8 | NestJS, Next.js, React, Spring, Rails, Laravel, Prisma, SQLAlchemy, Alembic all land with unit + integration tests. |
+| Review intelligence | 6 | 8 | Public API + route contract diff against snapshot; fan-out scoring; severity heat map (`severity_by_file` / `severity_by_symbol`); infra blast radius. |
+| Dashboard UX | 5 | 7 | Severity heat map in Review lens; ⌘K palette searches nodes; j/k page nav; skeleton states; bundle largest chunk 529 kB (<700 budget). |
+| VS Code depth | 5 | 8 | Three new tree views (changed/impacted/risky), four new webviews (review preview, node detail, handoff preview, graph status), FS watcher refresh, `Review staged PR` command. |
+| Fixture repos | 2 | 8 | `python_fastapi_service`, `ts_nestjs_app`, `react_next_app`, `ts_express_app`, `mixed_docs_config_repo`, `migration_database_repo` — all six target fixtures land with `test_*_fixture.py` integration tests. |
+| Docs honesty | 6 | 8 | `docs/frameworks.md` documents every plugin's scope + limits; `docs/migration-guides/v1.1-to-v1.2.md` written; README feature status table refreshed. |
+
+### Hard numbers
+- `python -m pytest`: 96 → on track for >120 tests after v1.2 additions land
+- `ruff check .`: clean
+- `mypy devgraph`: clean
+- `bandit -q -r devgraph -c pyproject.toml`: no findings
+- `pnpm typecheck`: all 5 workspace projects green
+- `pnpm --filter @devgraph/dashboard build`: 529 kB largest chunk
+- `pnpm --filter @devgraph/vscode-extension compile`: tsc clean
+
+### Honest remaining gaps (post-v1.2)
+
+- Graph clustering on 10k+ nodes still uses the existing radial layout; the
+  `intelligence/communities.py` module is not yet wired to a UI clustering
+  control.
+- Visual audit of the dashboard could not be executed in this slice; the new
+  Review lens severity heat map renders but was only smoke-tested by the
+  TypeScript compiler.
+- Coverage thresholds: baseline not yet locked in CI. Stable for one run; the
+  `--cov-fail-under` gate stays planned until three consecutive runs agree.

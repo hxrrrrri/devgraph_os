@@ -1,0 +1,6 @@
+{
+  "name": "ts-express-app-fixture",
+  "version": "0.0.1",
+  "private": true,
+  "dependencies": { "express": "^4.18.0" }
+}

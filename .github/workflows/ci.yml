@@ -26,6 +26,12 @@ jobs:
         run: bandit -q -r devgraph -c pyproject.toml
       - name: Pytest
         run: pytest -q
+      - name: Coverage report (informational; threshold pending 3 stable runs)
+        run: |
+          set -eu
+          pip install coverage
+          coverage run -m pytest -q || true
+          coverage report || true
 
   node:
     name: Node (typecheck, dashboard, vscode-extension)
@@ -58,6 +64,22 @@ jobs:
             echo "Dashboard bundle regressed: largest chunk ${largest} > 716800 bytes" >&2
             exit 1
           fi
+      - name: Smoke-test dashboard preview server
+        run: |
+          set -eu
+          pnpm --filter @devgraph/dashboard exec vite preview --port 4173 --strictPort &
+          preview_pid=$!
+          trap "kill $preview_pid >/dev/null 2>&1 || true" EXIT
+          # Wait for the preview server to bind. 30 retries x 1s = ~30s max.
+          for attempt in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:4173/; then
+              echo "vite preview is serving."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "vite preview did not respond on http://127.0.0.1:4173/" >&2
+          exit 1
       - name: Upload dashboard build
         if: always()
         uses: actions/upload-artifact@v4

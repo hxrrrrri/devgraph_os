@@ -1,0 +1,6 @@
+service:
+  name: ingest
+  replicas: 3
+  env:
+    LOG_LEVEL: info
+    REGION: us-east-1

@@ -164,6 +164,12 @@ class ReviewResult(BaseModel):
     database_or_schema_changes: list[str] = Field(default_factory=list)
     security_sensitive_changes: list[str] = Field(default_factory=list)
     migration_warnings: list[dict[str, Any]] = Field(default_factory=list)
+    api_signature_changes: list[dict[str, Any]] = Field(default_factory=list)
+    route_contract_changes: list[dict[str, Any]] = Field(default_factory=list)
+    fan_out: list[dict[str, Any]] = Field(default_factory=list)
+    infra_blast_radius: list[dict[str, Any]] = Field(default_factory=list)
+    severity_by_file: dict[str, str] = Field(default_factory=dict)
+    severity_by_symbol: dict[str, str] = Field(default_factory=dict)
     diff_summary: list[str] = Field(default_factory=list)
     changed_snippets: dict[str, str] = Field(default_factory=dict)
     risk_score: int

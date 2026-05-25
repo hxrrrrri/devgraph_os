@@ -351,6 +351,10 @@ class GraphStore:
         row = self.connection.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)).fetchone()
         return self._row_to_node(row) if row else None
 
+    def all_nodes(self) -> list[Node]:
+        rows = self.connection.execute("SELECT * FROM nodes").fetchall()
+        return [self._row_to_node(row) for row in rows]
+
     def nodes_for_files(self, paths: list[str]) -> list[Node]:
         if not paths:
             return []

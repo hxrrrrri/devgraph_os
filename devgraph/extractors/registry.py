@@ -13,6 +13,7 @@ from devgraph.constants import (
 from devgraph.core.schema import ExtractionResult
 from devgraph.extractors.base import BaseExtractor
 from devgraph.extractors.code.parser import CodeExtractor
+from devgraph.extractors.code.prisma import PrismaExtractor
 from devgraph.extractors.config.env_parser import EnvExtractor
 from devgraph.extractors.config.json_parser import JsonExtractor
 from devgraph.extractors.config.toml_parser import TomlExtractor
@@ -54,6 +55,7 @@ class ExtractorRegistry:
     def __init__(self, config: DevGraphConfig) -> None:
         self.config = config
         self._code = CodeExtractor(config)
+        self._prisma = PrismaExtractor(config)
         self._by_language: dict[str, BaseExtractor] = {
             "markdown": MarkdownExtractor(config),
             "rst": RstExtractor(config),
@@ -73,6 +75,8 @@ class ExtractorRegistry:
     def extract(self, root: Path, path: Path) -> ExtractionResult:
         category, language = classify_file(path)
         if category == "code":
+            if language == "prisma":
+                return self._prisma.extract(root, path)
             return self._code.extract(root, path)
         if language in self._by_language:
             return self._by_language[language].extract(root, path)

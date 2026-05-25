@@ -22,6 +22,7 @@ import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis
 import clsx from "clsx";
 import type { GraphPayload, GraphStatus, ReviewResult } from "@devgraph/schema";
 import { client } from "./api/client";
+import { SkeletonCard } from "./components/Skeleton";
 import { DebugLens } from "./debug/DebugLens";
 import { GraphView } from "./graph/GraphView";
 import { KnowledgeLens } from "./knowledge/KnowledgeLens";
@@ -63,10 +64,13 @@ export function App() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [search, setSearch] = useState("");
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   async function refresh() {
     try {
+      setLoading(true);
       setError(null);
       const [nextStatus, nextGraph, nextReview, memoryPayload] = await Promise.allSettled([
         client.status(),
@@ -83,6 +87,8 @@ export function App() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load DevGraph data");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -101,14 +107,43 @@ export function App() {
 
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const inEditable = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setPaletteOpen((value) => !value);
+        return;
+      }
+      if (event.key === "Escape" && paletteOpen) {
+        setPaletteOpen(false);
+        return;
+      }
+      if (inEditable || paletteOpen) return;
+      if (event.key === "j" || event.key === "k") {
+        event.preventDefault();
+        setPage((current) => {
+          const idx = navItems.findIndex((item) => item.id === current);
+          const next = event.key === "j" ? idx + 1 : idx - 1;
+          const safe = (next + navItems.length) % navItems.length;
+          return navItems[safe].id;
+        });
       }
     };
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
-  }, []);
+  }, [paletteOpen]);
+
+  const paletteResults = useMemo(() => {
+    const query = paletteQuery.trim().toLowerCase();
+    if (!query) {
+      return { commands: navItems, nodes: [] as typeof graph.nodes };
+    }
+    const commands = navItems.filter((item) => item.label.toLowerCase().includes(query) || item.id.includes(query));
+    const nodes = graph.nodes
+      .filter((node) => node.qualified_name.toLowerCase().includes(query) || node.name.toLowerCase().includes(query))
+      .slice(0, 8);
+    return { commands, nodes };
+  }, [paletteQuery, graph.nodes]);
 
   const filteredGraph = useMemo(() => {
     if (!search.trim()) return graph;
@@ -180,7 +215,15 @@ export function App() {
               {CurrentIcon ? <CurrentIcon size={20} /> : null}
               <span>{currentPage?.label}</span>
             </div>
-            {page === "overview" ? <Overview status={status} graph={graph} review={review} memories={memories} onReview={() => void loadReview()} /> : null}
+            {page === "overview" ? (
+              loading && !status ? (
+                <section className="command-grid">
+                  {Array.from({ length: 6 }).map((_, idx) => <SkeletonCard key={idx} />)}
+                </section>
+              ) : (
+                <Overview status={status} graph={graph} review={review} memories={memories} onReview={() => void loadReview()} />
+              )
+            ) : null}
             {page === "graph" ? <GraphView graph={filteredGraph} /> : null}
             {page === "review" ? <ReviewLens review={review} onLoadReview={() => void loadReview()} /> : null}
             {page === "debug" ? <DebugLens graph={filteredGraph} /> : null}
@@ -195,10 +238,28 @@ export function App() {
         <div className="palette-backdrop" onClick={() => setPaletteOpen(false)}>
           <div className="palette" onClick={(event) => event.stopPropagation()}>
             <div className="palette-head"><Command size={18} /> Commands</div>
-            {navItems.map((item) => (
-              <button key={item.id} onClick={() => { setPage(item.id); setPaletteOpen(false); }}>
+            <input
+              autoFocus
+              className="palette-input"
+              placeholder="Search commands, nodes, files…"
+              value={paletteQuery}
+              onChange={(event) => setPaletteQuery(event.target.value)}
+            />
+            {paletteResults.commands.map((item) => (
+              <button key={item.id} onClick={() => { setPage(item.id); setPaletteOpen(false); setPaletteQuery(""); }}>
                 <item.icon size={16} />
                 <span>{item.label}</span>
+              </button>
+            ))}
+            {paletteResults.nodes.length ? <div className="palette-section">Nodes</div> : null}
+            {paletteResults.nodes.map((node) => (
+              <button
+                key={node.id}
+                onClick={() => { setPage("graph"); setSearch(node.qualified_name); setPaletteOpen(false); setPaletteQuery(""); }}
+              >
+                <Network size={16} />
+                <span>{node.qualified_name}</span>
+                <small style={{ marginLeft: "auto", opacity: 0.6 }}>{node.type}</small>
               </button>
             ))}
           </div>
