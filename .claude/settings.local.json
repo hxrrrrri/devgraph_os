@@ -28,7 +28,25 @@
       "Bash(python -m pytest tests/integration/test_fastapi_fixture.py -v)",
       "Bash(python -m pytest tests/unit/test_js_framework_routes.py -x)",
       "Bash(mkdir -p tests/fixtures/repos/ts_nestjs_app/src/users tests/fixtures/repos/ts_nestjs_app/src/auth tests/fixtures/repos/react_next_app/app/users/\\\\[id\\\\] tests/fixtures/repos/react_next_app/app/api/health tests/fixtures/repos/react_next_app/pages/api 2>&1)",
-      "Bash(python -m pytest tests/integration/test_nestjs_fixture.py tests/integration/test_nextjs_fixture.py -x)"
+      "Bash(python -m pytest tests/integration/test_nestjs_fixture.py tests/integration/test_nextjs_fixture.py -x)",
+      "Bash(python -m pytest -x)",
+      "Bash(python -m pytest tests/unit/test_framework_plugins.py -x)",
+      "Bash(python -m pytest tests/unit/test_framework_plugins.py)",
+      "Bash(python -m pytest tests/unit/test_compat_diff.py tests/unit/test_symbol_mapping_accuracy.py tests/unit/test_review_engine_v12.py -x)",
+      "Bash(python -m pytest tests/integration/)",
+      "Bash(pnpm --filter @devgraph/schema build)",
+      "Bash(python -m pytest tests/unit/test_vscode_webview_render.py)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(gh pr create --title 'v1.2: framework plugins, review intelligence depth, fixtures, VSCode webviews' --body ' *)",
+      "Bash(where.exe gh *)",
+      "Bash(powershell -NoProfile -Command \"where.exe gh\")",
+      "Bash(pnpm build *)",
+      "Bash(pnpm -r typecheck)",
+      "Bash(python -m pytest tests)",
+      "Bash(pnpm install *)"
     ],
     "additionalDirectories": [
       "C:\\project_github\\devgraph_os\\tests\\fixtures\\repos\\react_next_app\\app\\users"

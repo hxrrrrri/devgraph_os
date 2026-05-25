@@ -1,8 +1,12 @@
 import {
+  communitiesPayloadSchema,
   graphPayloadSchema,
   graphStatusSchema,
+  handoffPayloadSchema,
+  type CommunitiesPayload,
   type GraphPayload,
   type GraphStatus,
+  type HandoffPayload,
   reviewResultSchema,
   type ReviewResult
 } from "@devgraph/schema";
@@ -33,8 +37,9 @@ export class DevGraphClient {
     return this.getJson("/api/onboarding");
   }
 
-  async handoff(): Promise<unknown> {
-    return this.getJson("/api/handoff");
+  async handoff(): Promise<HandoffPayload> {
+    const payload = await this.getJson("/api/handoff");
+    return handoffPayloadSchema.parse(payload);
   }
 
   async memories(): Promise<unknown> {
@@ -43,6 +48,11 @@ export class DevGraphClient {
 
   async flows(query = ""): Promise<unknown> {
     return this.getJson(`/api/flows?q=${encodeURIComponent(query)}`);
+  }
+
+  async communities(): Promise<CommunitiesPayload> {
+    const payload = await this.getJson("/api/communities");
+    return communitiesPayloadSchema.parse(payload);
   }
 
   async search(query: string): Promise<unknown> {

@@ -15,7 +15,6 @@ export default defineConfig({
         manualChunks: {
           "react-vendor": ["react", "react-dom"],
           "graph-vendor": ["@xyflow/react"],
-          "charts-vendor": ["recharts"],
           "motion-vendor": ["framer-motion"],
           "icons-vendor": ["lucide-react"]
         }

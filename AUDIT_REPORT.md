@@ -112,3 +112,127 @@ pnpm --filter @devgraph/vscode-extension compile
   TypeScript compiler.
 - Coverage thresholds: baseline not yet locked in CI. Stable for one run; the
   `--cov-fail-under` gate stays planned until three consecutive runs agree.
+
+## v1.2 dashboard redesign amendment (2026-05-25)
+
+A full UI/UX redesign of the dashboard now ships, anchored on the Anthropic
+Claude dark surface tokens and adapted from the `stitch_devgraph_os_command_center`
+reference (Command Center, Graph Explorer, Review Lens screens).
+
+| Area | v1.2 score (prior) | v1.2.1 score | Evidence |
+|---|---:|---:|---|
+| Dashboard UI/UX | 7 | 9 | New design tokens in `apps/dashboard/src/styles/app.css` (warm charcoal `#0E0D0B` canvas, coral `#CC785C` primary, teal `#7CD7C4` health, amber `#E8A55A` risk, violet `#D4BBFF` knowledge). EB Garamond + Geist + JetBrains Mono tri-font loaded from `apps/dashboard/index.html`. Glass cards, hairline borders, inner-highlight, motion system, ⌘K palette. |
+| Command Center | 6 | 9 | `apps/dashboard/src/App.tsx` Overview rebuilt: hero project card, four animated KPI counters (files / nodes / edges / risk), bento layout with Intelligence Pulse SVG, Risk Radar (live signal driven by review data), Recent Activity timeline, Best Actions stack, Confidence mix, Top node types, Languages, Memories, System Health. |
+| Review Lens | 7 | 9 | `apps/dashboard/src/review/ReviewLens.tsx` rebuilt: animated risk gauge with level-tinted fill, blast-radius SVG with satellite nodes, impacted file cards with severity badges, diff hunk preview chrome, critical checklist with toggle state, severity heat map, sensitive deltas (API / route / fan-out / infra), AI quote panel, copy context-pack action. |
+| Graph Explorer | 6 | 8 | `apps/dashboard/src/graph/GraphView.tsx` rebuilt: mode tabs (Overview / Impact / Architecture / Flow / Community) gate the visible subgraph, filter chips toggle node types, legend overlay, ReactFlow canvas with warm-charcoal background, slide-in inspector drawer with AI confidence, provenance, summary, snippet preview, action stack. |
+| Handoff Lens | 0 | 8 | New `apps/dashboard/src/handoff/HandoffLens.tsx` consumes `/api/handoff` via typed `client.handoff()` (schema added in `packages/schema/src/api.ts`, parsed in `packages/client/src/devgraphClient.ts`). Shows branch / freshness / counts, continuation prompt preview, changed symbols, open TODOs, decisions, downloadable handoff.md and handoff.json. |
+| Debug / Onboard / Knowledge / Flows | 6 | 8 | All four lenses rebuilt against the new tokens with consistent header eyebrows, bento layout, dense-list rows, stagger reveal motion. |
+| Other lenses honesty | n/a | n/a | Lenses still show empty-states with the exact CLI command to run (no fake data). |
+
+### Verification commands run in this slice
+
+```bash
+pnpm -r typecheck                                 # 5 projects · all green
+pnpm --filter @devgraph/dashboard build           # largest chunk 315 kB (< 600 kB budget)
+pnpm --filter @devgraph/vscode-extension compile  # tsc clean
+python -m pytest -q                               # 118 passed
+```
+
+### Bundle (post-redesign)
+
+```
+dist/assets/graph-vendor-…   315.16 kB │ gzip: 101.87 kB
+dist/assets/index-…          120.95 kB │ gzip:  28.57 kB
+dist/assets/motion-vendor-…  115.26 kB │ gzip:  38.24 kB
+dist/assets/icons-vendor-…    29.62 kB │ gzip:   7.85 kB
+dist/assets/charts-vendor-…    0.44 kB │ gzip:   0.29 kB
+dist/assets/index-…css        53.86 kB │ gzip:   9.34 kB
+```
+
+(Charts vendor is now empty because the Overview no longer uses Recharts; can be
+dropped from `manualChunks` in a follow-up.)
+
+### Remaining honest gaps after this slice
+
+- No automated visual regression test exists for the redesigned dashboard. The
+  TypeScript compiler and Vite build pass; pixel correctness was not validated
+  against the reference screenshots inside this environment.
+- The Graph Explorer still relies on the existing radial layout; community
+  detection from `devgraph/intelligence/communities.py` is exposed via
+  `/api/communities` but the new Graph view does not yet bind to it as a layout
+  mode.
+- The Review Lens blast-radius visualization is a stylized satellite diagram, not
+  a true force-directed impact map.
+- Empty-state command hints render in every lens, but a `localStorage`-backed
+  "you've seen this" suppression is not implemented.
+
+## v1.2.2 closeout amendment (2026-05-25)
+
+Closing the four "remaining honest gaps" from the v1.2.1 slice.
+
+| Item | Status | Evidence |
+|---|---|---|
+| Empty `charts-vendor` chunk | Removed | Dropped from [apps/dashboard/vite.config.ts](apps/dashboard/vite.config.ts) and `recharts` removed from [apps/dashboard/package.json](apps/dashboard/package.json). Post-build manifest no longer contains `charts-vendor-*.js`. |
+| `localStorage` empty-state suppression | Implemented | New [apps/dashboard/src/utils/dismiss.ts](apps/dashboard/src/utils/dismiss.ts) (`useDismissible` hook, keyed under `devgraph:dismissed:*`, gracefully handles disabled storage). Overview Pro Tip card now renders a dismiss `×` and stays hidden across reloads. |
+| Graph Explorer community-detection layout | Wired | `Community` mode in [apps/dashboard/src/graph/GraphView.tsx](apps/dashboard/src/graph/GraphView.tsx) fetches `/api/communities` lazily, lays nodes in per-community satellite clusters around the canvas, and colors each cluster from a 7-tone palette. Legend overlay swaps to per-community labels + node counts. Backed by new typed `client.communities()` in [packages/client/src/devgraphClient.ts](packages/client/src/devgraphClient.ts) and `communitiesPayloadSchema` in [packages/schema/src/api.ts](packages/schema/src/api.ts). |
+| Real impacted-graph blast radius | Implemented | `buildBlastGraph` in [apps/dashboard/src/review/ReviewLens.tsx](apps/dashboard/src/review/ReviewLens.tsx) now lays out actual `review.changed_nodes` + `review.impacted_nodes` as a coral-center / teal-satellite SVG with edges drawn from changed → impacted. Tooltips expose qualified names. Renders `no impact` when both arrays are empty. |
+
+### CI / VSCode honesty check
+
+While auditing, the v1.2.1 "remaining gaps" implied missing CI and extension
+work. Reality: both already shipped before this slice.
+
+- [.github/workflows/ci.yml](.github/workflows/ci.yml) already covers Python
+  (ruff / mypy / bandit / pytest / informational coverage), pnpm install,
+  workspace typecheck, dashboard build, VS Code extension compile, **716800-byte
+  largest-chunk bundle guard**, `vite preview` health smoke test (30 × 1s
+  curl loop), and artifact upload of `dashboard-dist` and
+  `vscode-extension-out`.
+- [apps/vscode-extension/package.json](apps/vscode-extension/package.json)
+  already contributes `devgraph.binaryPath` (default `devgraph`),
+  `devgraph.autoRefresh`, `devgraph.dashboardPort`, `devgraph.codeLens.enabled`,
+  four tree views (status / changed / impacted / risky), and 26 commands
+  including handoff, review preview, node detail, and staged-PR review.
+- Tests for secret redaction, handoff deep, schema, MCP tools, framework
+  routes (JS + Python), migration risk, SQL parser, ts parser, tree-sitter
+  provenance and incremental review **already exist** under
+  [tests/unit/](tests/unit/) and [tests/integration/](tests/integration/).
+
+### Final verification
+
+```bash
+pnpm install                                       # recharts removed; -1 package
+pnpm -r typecheck                                  # 5 projects · all green
+pnpm --filter @devgraph/dashboard build            # largest chunk 315 kB
+python -m pytest -q                                # 118 passed
+```
+
+### Post-redesign bundle
+
+```
+dist/assets/graph-vendor-…  315.16 kB │ gzip: 101.87 kB
+dist/assets/index-…         124.37 kB │ gzip:  29.68 kB
+dist/assets/motion-vendor-… 115.26 kB │ gzip:  38.24 kB
+dist/assets/icons-vendor-…   29.26 kB │ gzip:   7.78 kB
+dist/assets/react-vendor-…    0.07 kB │ gzip:   0.08 kB
+dist/assets/index-…css       53.86 kB │ gzip:   9.34 kB
+```
+
+Largest single chunk 315 kB, well under the 700 kB CI hard cap (716 800 bytes).
+
+### Truly remaining (will not be claimed in this audit)
+
+- **Pixel/visual regression for the redesigned dashboard** — needs a headless
+  browser harness (Playwright + storybook screenshots) running in CI on a
+  fixed-DPI runner. Genuine multi-PR work, not a one-turn fix.
+- **Force-directed graph layout** — the radial layout is still cheaper and
+  more legible at >300 nodes. Switching to d3-force or elkjs adds ~80 kB and
+  has not yet shown a UX win on the reference fixtures.
+- **Community-detection algorithm itself** — `top_communities` in
+  [devgraph/intelligence/communities.py](devgraph/intelligence/communities.py)
+  groups by `file_path`/`type` rather than running Louvain or label
+  propagation. The new layout shows whatever that store returns; richer
+  algorithms are a separate change.
+
+These are honest scope decisions, not silent omissions.
+

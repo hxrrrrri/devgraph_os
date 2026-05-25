@@ -35,3 +35,26 @@ export const reviewResultSchema = z.object({
 });
 
 export type ReviewResult = z.infer<typeof reviewResultSchema>;
+
+export const handoffPayloadSchema = z.object({
+  markdown_path: z.string(),
+  json_path: z.string(),
+  markdown: z.string(),
+  data: z.record(z.unknown())
+});
+
+export type HandoffPayload = z.infer<typeof handoffPayloadSchema>;
+
+export const communitySchema = z.object({
+  name: z.string(),
+  node_count: z.number()
+});
+
+export const communitiesPayloadSchema = z.object({
+  communities: z.array(communitySchema)
+});
+
+export type Community = z.infer<typeof communitySchema>;
+export type CommunitiesPayload = z.infer<typeof communitiesPayloadSchema>;
+
+
