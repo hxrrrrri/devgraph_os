@@ -1,0 +1,85 @@
+{
+  "name": "@devgraph/vscode-extension",
+  "displayName": "DevGraph OS",
+  "description": "Local-first developer knowledge graph integration for VS Code.",
+  "version": "0.1.0",
+  "publisher": "devgraph",
+  "private": true,
+  "engines": {
+    "vscode": "^1.92.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onCommand:devgraph.init",
+    "onCommand:devgraph.build",
+    "onCommand:devgraph.update",
+    "onCommand:devgraph.reviewChanges",
+    "onCommand:devgraph.explainCurrentFile",
+    "onCommand:devgraph.explainSelection",
+    "onCommand:devgraph.ask",
+    "onCommand:devgraph.openDashboard",
+    "onCommand:devgraph.handoff"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "devgraph.init", "title": "DevGraph: Initialize Project" },
+      { "command": "devgraph.build", "title": "DevGraph: Build Graph" },
+      { "command": "devgraph.update", "title": "DevGraph: Update Graph" },
+      { "command": "devgraph.reviewChanges", "title": "DevGraph: Review Current Changes" },
+      { "command": "devgraph.explainCurrentFile", "title": "DevGraph: Explain Current File" },
+      { "command": "devgraph.explainSelection", "title": "DevGraph: Explain Symbol" },
+      { "command": "devgraph.ask", "title": "DevGraph: Ask About Project" },
+      { "command": "devgraph.openDashboard", "title": "DevGraph: Open Dashboard" },
+      { "command": "devgraph.handoff", "title": "DevGraph: Generate Handoff" }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "devgraph",
+          "title": "DevGraph",
+          "icon": "resources/devgraph.svg"
+        }
+      ]
+    },
+    "views": {
+      "devgraph": [
+        {
+          "id": "devgraph.statusView",
+          "name": "Project Graph"
+        }
+      ]
+    },
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "devgraph.explainCurrentFile",
+          "group": "navigation@9"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "devgraph.explainSelection",
+          "group": "navigation@9"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "devgraph.reviewChanges",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.6",
+    "@types/vscode": "^1.92.0",
+    "typescript": "^5.6.3"
+  }
+}
+

@@ -1,0 +1,15 @@
+.devgraph/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+dist/
+build/
+*.egg-info/
+node_modules/
+apps/*/dist/
+apps/vscode-extension/out/
+.DS_Store

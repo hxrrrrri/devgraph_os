@@ -1,0 +1,29 @@
+{
+  "name": "@devgraph/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -p tsconfig.json && vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@devgraph/client": "workspace:*",
+    "@devgraph/schema": "workspace:*",
+    "@devgraph/ui": "workspace:*",
+    "@vitejs/plugin-react": "^4.3.3",
+    "@xyflow/react": "^12.3.5",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}
+

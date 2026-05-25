@@ -1,0 +1,16 @@
+{
+  "name": "devgraph-os-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm -r build",
+    "dashboard:dev": "pnpm --filter @devgraph/dashboard dev",
+    "vscode:compile": "pnpm --filter @devgraph/vscode-extension compile"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
+

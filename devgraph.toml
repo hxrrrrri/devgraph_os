@@ -1,0 +1,33 @@
+[project]
+name = "devgraph-os"
+
+[indexing]
+include = ["devgraph/**", "docs/**", "apps/**", "packages/**", "tests/**", "examples/**"]
+exclude = [
+  ".git/**",
+  ".devgraph/**",
+  "node_modules/**",
+  "dist/**",
+  "build/**",
+  ".venv/**",
+  "__pycache__/**",
+  "*.pyc",
+  "*.lock",
+  "pnpm-lock.yaml"
+]
+respect_gitignore = true
+
+[storage]
+path = ".devgraph"
+
+[review]
+default_base = "origin/main"
+max_depth = 2
+token_budget = "normal"
+
+[privacy]
+store_env_values = false
+allow_llm_enrichment = false
+
+[dashboard]
+port = 38987

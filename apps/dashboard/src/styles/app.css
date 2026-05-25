@@ -1,0 +1,288 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f7f8fa;
+  color: #181b20;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 232px 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  background: #ffffff;
+  border-right: 1px solid #d7dce2;
+  padding: 20px 14px;
+}
+
+.brand {
+  font-weight: 700;
+  margin: 4px 8px 20px;
+}
+
+.nav-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #3d4652;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: 6px;
+  text-transform: capitalize;
+  cursor: pointer;
+}
+
+.nav-item.active,
+.nav-item:hover {
+  background: #eef3f6;
+  color: #101418;
+}
+
+.main {
+  min-width: 0;
+  padding: 24px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.topbar p {
+  margin: 4px 0 0;
+  color: #5f6875;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(360px, 40vw);
+  border: 1px solid #c7ced8;
+  background: #ffffff;
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+
+.search input {
+  border: 0;
+  outline: 0;
+  width: 100%;
+}
+
+.icon-button,
+.primary {
+  border: 1px solid #c7ced8;
+  background: #ffffff;
+  border-radius: 6px;
+  cursor: pointer;
+  min-height: 36px;
+}
+
+.icon-button {
+  width: 36px;
+  display: inline-grid;
+  place-items: center;
+}
+
+.primary {
+  padding: 0 12px;
+  background: #0f6b5f;
+  color: #ffffff;
+  border-color: #0f6b5f;
+}
+
+.alert {
+  border: 1px solid #e3a29a;
+  background: #fff1ef;
+  color: #8f1f14;
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: 14px;
+}
+
+.metric,
+.panel {
+  background: #ffffff;
+  border: 1px solid #d7dce2;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.metric span {
+  display: block;
+  color: #5f6875;
+  margin-bottom: 8px;
+}
+
+.metric strong {
+  font-size: 28px;
+}
+
+.wide {
+  grid-column: span 2;
+}
+
+.panel h2,
+.panel h3,
+.lens h2 {
+  margin: 0 0 12px;
+  font-size: 17px;
+}
+
+.list {
+  display: grid;
+  gap: 8px;
+}
+
+.graph-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 14px;
+  min-height: calc(100vh - 128px);
+}
+
+.graph-canvas {
+  min-height: 620px;
+  background: #ffffff;
+  border: 1px solid #d7dce2;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.detail-panel {
+  background: #ffffff;
+  border: 1px solid #d7dce2;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.detail-panel dt {
+  color: #5f6875;
+  margin-top: 12px;
+}
+
+.detail-panel dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.lens {
+  display: grid;
+  gap: 14px;
+}
+
+.lens-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.review-grid,
+.knowledge-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.risk {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.risk.high {
+  color: #b42318;
+}
+
+.risk.medium {
+  color: #9b5b00;
+}
+
+.risk.low {
+  color: #0f6b5f;
+}
+
+.debug-input {
+  min-height: 160px;
+  resize: vertical;
+  border: 1px solid #c7ced8;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+label {
+  display: block;
+  margin: 8px 0;
+}
+
+.empty-state {
+  color: #5f6875;
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid #d7dce2;
+  }
+
+  .graph-layout,
+  .review-grid,
+  .knowledge-grid,
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wide {
+    grid-column: span 1;
+  }
+
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .search {
+    width: 100%;
+  }
+}
+

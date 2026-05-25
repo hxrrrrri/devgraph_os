@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "devgraph-os"
+version = "0.1.0"
+description = "Local-first AI context engine and developer knowledge graph for software projects."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "DevGraph OS contributors" }]
+keywords = ["ai", "developer-tools", "knowledge-graph", "mcp", "code-review"]
+dependencies = [
+  "networkx>=3.1",
+  "pydantic>=2.5",
+  "typer>=0.12",
+  "watchdog>=3.0",
+  "pyyaml>=6.0",
+  "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.6"]
+server = ["fastapi>=0.110", "uvicorn>=0.27"]
+docs = ["pypdf>=4.0", "python-docx>=1.1"]
+parsers = ["tree-sitter>=0.22", "tree-sitter-language-pack>=0.6"]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.5",
+  "mypy>=1.9",
+  "bandit>=1.7",
+  "types-PyYAML>=6.0",
+]
+
+[project.scripts]
+devgraph = "devgraph.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["devgraph*"]
+
+[tool.setuptools.package-data]
+devgraph = ["templates/**/*.md", "templates/**/*.txt"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["E501", "B008", "SIM105"]
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["devgraph"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "apps", "packages"]
+skips = ["B608"]
