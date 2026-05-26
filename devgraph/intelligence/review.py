@@ -10,6 +10,7 @@ from typing import Any
 from devgraph.config import DevGraphConfig
 from devgraph.core.graph_store import GraphStore
 from devgraph.core.schema import Node, ReviewResult
+from devgraph.intelligence.compat import diff_public_api, diff_routes, load_snapshot
 from devgraph.intelligence.migration_risk import detect_migration_warnings
 from devgraph.intelligence.risk import risk_level, score_risk
 from devgraph.retrieval.context_packer import ContextPacker, ContextRequest
@@ -28,6 +29,7 @@ class ReviewEngine:
         base: str | None = None,
         staged: bool = False,
         files: Sequence[str] | None = None,
+        previous_snapshot: Path | None = None,
     ) -> ReviewResult:
         base_ref = base
         changes = changed_files(self.root, base=base_ref, staged=staged)
@@ -77,6 +79,24 @@ class ReviewEngine:
         database_or_schema_changes = self._database_or_schema_changes(files_to_review, changed_symbols)
         security_sensitive_changes = self._security_sensitive_changes(files_to_review, changed_symbols)
         migration_warnings = detect_migration_warnings(files_to_review, changed_snippets)
+        snapshot_payload = (
+            load_snapshot(previous_snapshot) if previous_snapshot is not None else None
+        )
+        if snapshot_payload is not None:
+            all_current_nodes = self.store.all_nodes()
+            api_signature_changes = diff_public_api(snapshot_payload, all_current_nodes)
+            route_contract_changes = diff_routes(snapshot_payload, all_current_nodes)
+        else:
+            api_signature_changes = []
+            route_contract_changes = []
+        fan_out_entries = self._fan_out(changed_symbols, impacted_nodes)
+        infra_blast_radius = self._infra_blast_radius(files_to_review)
+        severity_by_file, severity_by_symbol = _severity_maps(
+            migration_warnings,
+            api_signature_changes,
+            route_contract_changes,
+            fan_out_entries,
+        )
         packer = ContextPacker(self.store)
         context = packer.pack(
             ContextRequest(
@@ -105,6 +125,12 @@ class ReviewEngine:
             database_or_schema_changes=database_or_schema_changes,
             security_sensitive_changes=security_sensitive_changes,
             migration_warnings=migration_warnings,
+            api_signature_changes=api_signature_changes,
+            route_contract_changes=route_contract_changes,
+            fan_out=fan_out_entries,
+            infra_blast_radius=infra_blast_radius,
+            severity_by_file=severity_by_file,
+            severity_by_symbol=severity_by_symbol,
             diff_summary=diff_summary,
             changed_snippets=changed_snippets,
             risk_score=score,
@@ -191,6 +217,122 @@ class ReviewEngine:
             if any(hint in node.qualified_name.lower() for hint in hints)
         ]
         return sorted({*path_hits, *symbol_hits})
+
+    def _fan_out(
+        self,
+        changed_symbols: Sequence[Node],
+        impacted_nodes: Sequence[Node],
+    ) -> list[dict[str, Any]]:
+        if not changed_symbols:
+            return []
+        impacted_ids = {node.id for node in impacted_nodes}
+        entries: list[dict[str, Any]] = []
+        for symbol in changed_symbols:
+            neighborhood = self.store.get_neighborhood([symbol.id], depth=2, limit=200)
+            dependent_ids = {
+                edge["source_id"]
+                for edge in neighborhood["edges"]
+                if edge["target_id"] == symbol.id
+            }
+            fan_in = len(dependent_ids)
+            fan_out_count = len(
+                {
+                    edge["target_id"]
+                    for edge in neighborhood["edges"]
+                    if edge["source_id"] == symbol.id
+                }
+            )
+            total_impacted = len(impacted_ids)
+            ratio = (
+                round(total_impacted / max(1, len(changed_symbols)), 3)
+                if total_impacted
+                else 0.0
+            )
+            entries.append(
+                {
+                    "qualified_name": symbol.qualified_name,
+                    "file_path": symbol.file_path,
+                    "fan_in": fan_in,
+                    "fan_out": fan_out_count,
+                    "impact_ratio": ratio,
+                }
+            )
+        entries.sort(key=lambda item: (item["fan_in"] + item["fan_out"]), reverse=True)
+        return entries[:10]
+
+    def _infra_blast_radius(self, files: list[str]) -> list[dict[str, Any]]:
+        infra_files = self._config_or_infra_changes(files)
+        if not infra_files:
+            return []
+        entries: list[dict[str, Any]] = []
+        for path in infra_files:
+            path_lower = path.lower()
+            if path_lower.endswith(".env") or path_lower.endswith("/.env") or path_lower == ".env":
+                touched = self._env_dependents(path)
+                category = "env"
+            elif "dockerfile" in path_lower:
+                touched = self._docker_dependents(path)
+                category = "docker"
+            elif path_lower.endswith((".tf", ".tfvars")):
+                touched = self._terraform_dependents(path)
+                category = "terraform"
+            elif ".github" in path_lower and (path_lower.endswith(".yml") or path_lower.endswith(".yaml")):
+                touched = self._workflow_dependents(path)
+                category = "ci"
+            elif any(hint in path_lower for hint in ("helm", "k8s", "kubernetes", "manifests")):
+                touched = self._k8s_dependents(path)
+                category = "k8s"
+            else:
+                touched = []
+                category = "other"
+            entries.append(
+                {
+                    "file_path": path,
+                    "category": category,
+                    "touched": touched,
+                }
+            )
+        return entries
+
+    def _env_dependents(self, path: str) -> list[str]:
+        nodes = self.store.nodes_for_files([path])
+        touched: set[str] = set()
+        for node in nodes:
+            for key in (node.metadata or {}).get("keys", []) or []:
+                touched.add(f"env:{key}")
+        return sorted(touched)
+
+    def _docker_dependents(self, path: str) -> list[str]:
+        services = [
+            node.qualified_name
+            for node in self.store.nodes_for_files([path])
+            if node.type == "service"
+        ]
+        return sorted(set(services))
+
+    def _terraform_dependents(self, path: str) -> list[str]:
+        resources = [
+            node.qualified_name
+            for node in self.store.nodes_for_files([path])
+            if node.type in {"resource", "service"}
+        ]
+        return sorted(set(resources))
+
+    def _workflow_dependents(self, path: str) -> list[str]:
+        pipelines = [
+            node.qualified_name
+            for node in self.store.nodes_for_files([path])
+            if node.type in {"pipeline", "step"}
+        ]
+        return sorted(set(pipelines))
+
+    def _k8s_dependents(self, path: str) -> list[str]:
+        resources = [
+            node.qualified_name
+            for node in self.store.nodes_for_files([path])
+            if node.type in {"resource", "service"}
+        ]
+        return sorted(set(resources))
 
     def _impacted_flows(self, nodes: Sequence[Node]) -> list[dict[str, object]]:
         flows: list[dict[str, object]] = []
@@ -308,6 +450,67 @@ class ReviewEngine:
         if affected_tests:
             commands.insert(0, "Run related tests listed in the review output.")
         return commands
+
+
+SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3}
+
+
+def _severity_maps(
+    migration_warnings: Sequence[dict[str, Any]],
+    api_signature_changes: Sequence[dict[str, Any]],
+    route_contract_changes: Sequence[dict[str, Any]],
+    fan_out_entries: Sequence[dict[str, Any]],
+) -> tuple[dict[str, str], dict[str, str]]:
+    by_file: dict[str, int] = {}
+    by_symbol: dict[str, int] = {}
+
+    def _record_file(path: str | None, severity: str | None) -> None:
+        if not path or not severity:
+            return
+        rank = SEVERITY_RANK.get(severity.lower(), 0)
+        if not rank:
+            return
+        if rank > by_file.get(path, 0):
+            by_file[path] = rank
+
+    def _record_symbol(qn: str | None, severity: str | None) -> None:
+        if not qn or not severity:
+            return
+        rank = SEVERITY_RANK.get(severity.lower(), 0)
+        if not rank:
+            return
+        if rank > by_symbol.get(qn, 0):
+            by_symbol[qn] = rank
+
+    for warning in migration_warnings:
+        _record_file(warning.get("file_path"), warning.get("severity"))
+    for warning in api_signature_changes:
+        _record_file(warning.get("file_path"), warning.get("severity"))
+        _record_symbol(warning.get("qualified_name"), warning.get("severity"))
+    for warning in route_contract_changes:
+        _record_file(warning.get("file_path"), warning.get("severity"))
+    for entry in fan_out_entries:
+        impact = float(entry.get("impact_ratio") or 0.0)
+        fan_in = int(entry.get("fan_in") or 0)
+        if fan_in >= 10 or impact >= 5:
+            severity_value = "high"
+        elif fan_in >= 3 or impact >= 2:
+            severity_value = "medium"
+        else:
+            continue
+        _record_file(entry.get("file_path"), severity_value)
+        _record_symbol(entry.get("qualified_name"), severity_value)
+
+    def _label(rank: int) -> str:
+        for name, value in SEVERITY_RANK.items():
+            if value == rank:
+                return name
+        return "low"
+
+    return (
+        {path: _label(rank) for path, rank in by_file.items()},
+        {qn: _label(rank) for qn, rank in by_symbol.items()},
+    )
 
 
 def format_review_markdown(result: ReviewResult) -> str:

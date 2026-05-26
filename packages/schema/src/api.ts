@@ -15,6 +15,13 @@ export const reviewResultSchema = z.object({
   config_or_infra_changes: z.array(z.string()).default([]),
   database_or_schema_changes: z.array(z.string()).default([]),
   security_sensitive_changes: z.array(z.string()).default([]),
+  migration_warnings: z.array(z.record(z.unknown())).default([]),
+  api_signature_changes: z.array(z.record(z.unknown())).default([]),
+  route_contract_changes: z.array(z.record(z.unknown())).default([]),
+  fan_out: z.array(z.record(z.unknown())).default([]),
+  infra_blast_radius: z.array(z.record(z.unknown())).default([]),
+  severity_by_file: z.record(z.string()).default({}),
+  severity_by_symbol: z.record(z.string()).default({}),
   diff_summary: z.array(z.string()).default([]),
   changed_snippets: z.record(z.string()).default({}),
   risk_score: z.number(),
@@ -28,3 +35,67 @@ export const reviewResultSchema = z.object({
 });
 
 export type ReviewResult = z.infer<typeof reviewResultSchema>;
+
+export const handoffPayloadSchema = z.object({
+  markdown_path: z.string(),
+  json_path: z.string(),
+  markdown: z.string(),
+  data: z.record(z.unknown())
+});
+
+export type HandoffPayload = z.infer<typeof handoffPayloadSchema>;
+
+export const communitySchema = z.object({
+  name: z.string(),
+  node_count: z.number()
+});
+
+export const communitiesPayloadSchema = z.object({
+  communities: z.array(communitySchema)
+});
+
+export type Community = z.infer<typeof communitySchema>;
+export type CommunitiesPayload = z.infer<typeof communitiesPayloadSchema>;
+
+export const pathPayloadSchema = z.object({
+  source: z.string(),
+  target: z.string(),
+  found: z.boolean(),
+  nodes: z.array(graphNodeSchema)
+});
+
+export type PathPayload = z.infer<typeof pathPayloadSchema>;
+
+export const architectureLayerSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  color: z.string(),
+  node_ids: z.array(z.string()),
+  stats: z.object({
+    files: z.number(),
+    symbols: z.number(),
+    tests: z.number(),
+    docs: z.number(),
+    total: z.number()
+  })
+});
+
+export const architecturePayloadSchema = z.object({
+  total_nodes: z.number(),
+  layer_count: z.number(),
+  layers: z.array(architectureLayerSchema)
+});
+
+export type ArchitectureLayer = z.infer<typeof architectureLayerSchema>;
+export type ArchitecturePayload = z.infer<typeof architecturePayloadSchema>;
+
+export const layerDetailPayloadSchema = z.object({
+  layer: architectureLayerSchema,
+  nodes: z.array(z.record(z.unknown())),
+  edges: z.array(z.record(z.unknown()))
+});
+
+export type LayerDetailPayload = z.infer<typeof layerDetailPayloadSchema>;
+
+

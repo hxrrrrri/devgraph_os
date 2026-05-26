@@ -351,6 +351,10 @@ class GraphStore:
         row = self.connection.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)).fetchone()
         return self._row_to_node(row) if row else None
 
+    def all_nodes(self) -> list[Node]:
+        rows = self.connection.execute("SELECT * FROM nodes").fetchall()
+        return [self._row_to_node(row) for row in rows]
+
     def nodes_for_files(self, paths: list[str]) -> list[Node]:
         if not paths:
             return []
@@ -534,11 +538,18 @@ class GraphStore:
         target = self.find_nodes(target_query, limit=1)
         if not source or not target:
             return []
+        return self.shortest_path_by_id(source[0].id, target[0].id, cutoff=cutoff)
+
+    def shortest_path_by_id(self, source_id: str, target_id: str, cutoff: int = 6) -> list[Node]:
+        if not source_id or not target_id:
+            return []
+        if self.get_node(source_id) is None or self.get_node(target_id) is None:
+            return []
         graph = nx.Graph()
         rows = self.connection.execute("SELECT source_id, target_id FROM edges").fetchall()
         graph.add_edges_from((row["source_id"], row["target_id"]) for row in rows)
         try:
-            ids = nx.shortest_path(graph, source[0].id, target[0].id)
+            ids = nx.shortest_path(graph, source_id, target_id)
         except (nx.NetworkXNoPath, nx.NodeNotFound):
             return []
         if len(ids) > cutoff + 1:
