@@ -57,4 +57,45 @@ export const communitiesPayloadSchema = z.object({
 export type Community = z.infer<typeof communitySchema>;
 export type CommunitiesPayload = z.infer<typeof communitiesPayloadSchema>;
 
+export const pathPayloadSchema = z.object({
+  source: z.string(),
+  target: z.string(),
+  found: z.boolean(),
+  nodes: z.array(graphNodeSchema)
+});
+
+export type PathPayload = z.infer<typeof pathPayloadSchema>;
+
+export const architectureLayerSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  color: z.string(),
+  node_ids: z.array(z.string()),
+  stats: z.object({
+    files: z.number(),
+    symbols: z.number(),
+    tests: z.number(),
+    docs: z.number(),
+    total: z.number()
+  })
+});
+
+export const architecturePayloadSchema = z.object({
+  total_nodes: z.number(),
+  layer_count: z.number(),
+  layers: z.array(architectureLayerSchema)
+});
+
+export type ArchitectureLayer = z.infer<typeof architectureLayerSchema>;
+export type ArchitecturePayload = z.infer<typeof architecturePayloadSchema>;
+
+export const layerDetailPayloadSchema = z.object({
+  layer: architectureLayerSchema,
+  nodes: z.array(z.record(z.unknown())),
+  edges: z.array(z.record(z.unknown()))
+});
+
+export type LayerDetailPayload = z.infer<typeof layerDetailPayloadSchema>;
+
 

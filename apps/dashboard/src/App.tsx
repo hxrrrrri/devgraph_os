@@ -32,11 +32,14 @@ import { client } from "./api/client";
 import { SkeletonCard } from "./components/Skeleton";
 import { useDismissible } from "./utils/dismiss";
 import { DebugLens } from "./debug/DebugLens";
-import { GraphView } from "./graph/GraphView";
+import { GraphExplorer } from "./graph/GraphExplorer";
 import { HandoffLens } from "./handoff/HandoffLens";
 import { KnowledgeLens } from "./knowledge/KnowledgeLens";
 import { OnboardingLens } from "./onboard/OnboardingLens";
 import { ReviewLens } from "./review/ReviewLens";
+import { useDashboardStore } from "./store/dashboardStore";
+import { GuidedTour } from "./onboard/GuidedTour";
+import { deriveArchitecture } from "./graph/graphAdapter";
 
 type Page = "overview" | "graph" | "review" | "debug" | "onboard" | "knowledge" | "flows" | "handoff";
 type Memory = { id: string; kind: string; content: string; created_at?: string };
@@ -72,6 +75,17 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const storeSetGraph = useDashboardStore((s) => s.setGraph);
+  const storeSetStatus = useDashboardStore((s) => s.setStatus);
+  const storeSetReview = useDashboardStore((s) => s.setReview);
+  const storeSetMemories = useDashboardStore((s) => s.setMemories);
+  const togglePathFinder = useDashboardStore((s) => s.togglePathFinder);
+  const toggleFileExplorer = useDashboardStore((s) => s.toggleFileExplorer);
+  const toggleDiffMode = useDashboardStore((s) => s.toggleDiffMode);
+  const tourActive = useDashboardStore((s) => s.tourActive);
+  const startTour = useDashboardStore((s) => s.startTour);
+  const stopTour = useDashboardStore((s) => s.stopTour);
+
   async function refresh() {
     try {
       setLoading(true);
@@ -82,12 +96,23 @@ export function App() {
         client.review(),
         client.memories()
       ]);
-      if (nextStatus.status === "fulfilled") setStatus(nextStatus.value);
-      if (nextGraph.status === "fulfilled") setGraph(nextGraph.value);
-      if (nextReview.status === "fulfilled") setReview(nextReview.value);
+      if (nextStatus.status === "fulfilled") {
+        setStatus(nextStatus.value);
+        storeSetStatus(nextStatus.value);
+      }
+      if (nextGraph.status === "fulfilled") {
+        setGraph(nextGraph.value);
+        storeSetGraph(nextGraph.value);
+      }
+      if (nextReview.status === "fulfilled") {
+        setReview(nextReview.value);
+        storeSetReview(nextReview.value);
+      }
       if (memoryPayload.status === "fulfilled") {
         const payload = memoryPayload.value as { memories?: Memory[] };
-        setMemories(payload.memories ?? []);
+        const next = payload.memories ?? [];
+        setMemories(next);
+        storeSetMemories(next);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load DevGraph data");
@@ -100,6 +125,7 @@ export function App() {
     try {
       const nextReview = await client.review();
       setReview(nextReview);
+      storeSetReview(nextReview);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load review data");
     }
@@ -132,10 +158,27 @@ export function App() {
           return navItems[safe].id;
         });
       }
+      if (event.key === "p" || event.key === "P") {
+        event.preventDefault();
+        togglePathFinder();
+      }
+      if (event.key === "f" || event.key === "F") {
+        event.preventDefault();
+        toggleFileExplorer();
+      }
+      if (event.key === "d" || event.key === "D") {
+        event.preventDefault();
+        toggleDiffMode();
+      }
+      if (event.key === "t" || event.key === "T") {
+        event.preventDefault();
+        if (tourActive) stopTour();
+        else startTour();
+      }
     };
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
-  }, [paletteOpen]);
+  }, [paletteOpen, togglePathFinder, toggleFileExplorer, toggleDiffMode, tourActive, startTour, stopTour]);
 
   const paletteResults = useMemo(() => {
     const query = paletteQuery.trim().toLowerCase();
@@ -246,7 +289,7 @@ export function App() {
                 />
               )
             ) : null}
-            {page === "graph" ? <GraphView graph={filteredGraph} /> : null}
+            {page === "graph" ? <GraphExplorer /> : null}
             {page === "review" ? <ReviewLens review={review} onLoadReview={() => void loadReview()} /> : null}
             {page === "debug" ? <DebugLens graph={filteredGraph} /> : null}
             {page === "onboard" ? <OnboardingLens status={status} graph={graph} /> : null}
@@ -265,6 +308,14 @@ export function App() {
           <a href="https://github.com/hxrrrrri/devgraph_os/blob/main/CHANGELOG.md" target="_blank" rel="noreferrer">Changelog</a>
         </div>
       </footer>
+
+      <GuidedTour
+        onCta={(action) => {
+          if (action === "openReview") setPage("review");
+          else if (action === "openHandoff") setPage("handoff");
+          else if (action === "overview") setPage("graph");
+        }}
+      />
 
       {paletteOpen ? (
         <div className="palette-backdrop" onClick={() => setPaletteOpen(false)}>
@@ -329,6 +380,7 @@ function Overview({
 
   const activity = useMemo(() => buildActivity({ status, review, memories }), [status, review, memories]);
   const radarSectors = useMemo(() => buildRadar(review), [review]);
+  const architecture = useMemo(() => deriveArchitecture(graph), [graph]);
 
   return (
     <motion.div variants={stagger} initial="hidden" animate="show" style={{ display: "grid", gap: 22 }}>
@@ -432,6 +484,41 @@ function Overview({
                 </div>
               </div>
             ))}
+          </div>
+        </motion.section>
+      </motion.div>
+
+      {/* Architecture snapshot: layer load + top hubs */}
+      <motion.div className="bento" variants={stagger}>
+        <motion.section className="glass-card col-7" variants={rise}>
+          <div className="card-head">
+            <div>
+              <h3>Architecture snapshot</h3>
+              <p className="subtitle">{architecture.layers.length} layers · derived from path + node type. Click "open architecture overview" to drill in.</p>
+            </div>
+            <button className="btn btn-secondary" onClick={() => setPage("graph")}>
+              <Network size={14} /> Open architecture overview
+            </button>
+          </div>
+          <div className="dg-arch-grid">
+            {architecture.layers.length ? architecture.layers.map((layer) => (
+              <button key={layer.id} className="dg-arch-card" onClick={() => setPage("graph")}>
+                <span className="dg-arch-bar" style={{ background: layer.color }} />
+                <span className="dg-arch-name">{layer.name}</span>
+                <span className="dg-arch-stats">
+                  <b>{layer.nodeIds.length}</b> nodes · {layer.stats.symbols} symbols · {layer.stats.tests} tests
+                </span>
+              </button>
+            )) : <em style={{ color: "var(--muted-dark)" }}>No layers — run <code>devgraph build</code>.</em>}
+          </div>
+        </motion.section>
+
+        <motion.section className="glass-card col-5" variants={rise}>
+          <div className="card-head"><div><h3>Top connected nodes</h3><p className="subtitle">Hubs by combined degree.</p></div></div>
+          <div className="dense-list" style={{ maxHeight: 240 }}>
+            {architecture.topConnected.length ? architecture.topConnected.slice(0, 8).map((node) => (
+              <span key={node.id}><b>{node.type}</b>{node.qualified_name}</span>
+            )) : <em style={{ color: "var(--muted-dark)" }}>No edges resolved yet.</em>}
           </div>
         </motion.section>
       </motion.div>

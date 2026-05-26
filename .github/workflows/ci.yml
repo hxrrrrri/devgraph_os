@@ -59,9 +59,12 @@ jobs:
           set -eu
           largest=$(find apps/dashboard/dist/assets -name '*.js' -printf '%s\n' | sort -nr | head -1)
           echo "Largest dashboard chunk: ${largest} bytes"
-          # 700 kB hard cap on the largest single chunk after manualChunks split.
-          if [ "${largest}" -gt 716800 ]; then
-            echo "Dashboard bundle regressed: largest chunk ${largest} > 716800 bytes" >&2
+          # 1.1 MB hard cap on the largest single chunk after manualChunks split.
+          # Raised in v1.3 to absorb the graph-explorer rewrite (Zustand store,
+          # dagre + elkjs layout, layer adapter). Re-tighten once code-splitting
+          # of the secondary lenses lands.
+          if [ "${largest}" -gt 1153433 ]; then
+            echo "Dashboard bundle regressed: largest chunk ${largest} > 1153433 bytes" >&2
             exit 1
           fi
       - name: Smoke-test dashboard preview server

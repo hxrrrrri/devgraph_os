@@ -46,7 +46,11 @@
       "Bash(pnpm build *)",
       "Bash(pnpm -r typecheck)",
       "Bash(python -m pytest tests)",
-      "Bash(pnpm install *)"
+      "Bash(pnpm install *)",
+      "Bash(pnpm --filter @devgraph/dashboard typecheck)",
+      "Bash(python -m pytest tests/unit/test_http_api.py -q)",
+      "Bash(pnpm --filter @devgraph/dashboard test)",
+      "Bash(grep -n \"function Overview\\\\|<motion.section className=\\\\\"glass-card col-5\\\\\" variants={rise}>$\" c:/project_github/devgraph_os/apps/dashboard/src/App.tsx)"
     ],
     "additionalDirectories": [
       "C:\\project_github\\devgraph_os\\tests\\fixtures\\repos\\react_next_app\\app\\users"

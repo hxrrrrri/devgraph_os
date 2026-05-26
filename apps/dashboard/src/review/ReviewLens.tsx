@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
+import { ModeGraph } from "../graph/ModeGraph";
+import { useDashboardStore } from "../store/dashboardStore";
 import {
   AlertTriangle,
   Brain,
@@ -53,6 +55,7 @@ export function ReviewLens({ review, onLoadReview }: { review: ReviewResult | nu
   return (
     <motion.div variants={stagger} initial="hidden" animate="show" style={{ display: "grid", gap: 22 }}>
       <ReviewHeader onLoadReview={onLoadReview} review={review} />
+      <ReviewImpactGraph />
 
       <div className="review-grid">
         {/* Left column: risk + blast */}
@@ -327,6 +330,27 @@ export function ReviewLens({ review, onLoadReview }: { review: ReviewResult | nu
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function ReviewImpactGraph() {
+  const changed = useDashboardStore((s) => s.changedNodeIds.size);
+  const affected = useDashboardStore((s) => s.affectedNodeIds.size);
+  if (changed === 0 && affected === 0) return null;
+  return (
+    <section className="glass-card dg-review-impact-card">
+      <div className="card-head">
+        <div>
+          <h3>Impact graph</h3>
+          <p className="subtitle">
+            {changed} changed · {affected} affected · 1-hop neighbourhood. Click any node to inspect.
+          </p>
+        </div>
+      </div>
+      <div className="dg-review-impact-host">
+        <ModeGraph mode="Impact" />
+      </div>
+    </section>
   );
 }
 

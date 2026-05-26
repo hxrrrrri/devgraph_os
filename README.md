@@ -27,7 +27,7 @@ Honest maturity per area. Treat *Beta* as working but rough edges; *Experimental
 | Incremental update + diff parser | Implemented | Hunks mapped to graph nodes. |
 | Cross-agent handoff (markdown + JSON) | Implemented | Branch, changed symbols, impacted files, continue prompt. |
 | MCP tool surface | Implemented | `build_or_update_graph`, `get_context`, `review_changes`, `query_graph`, memory. |
-| Dashboard (dark command center, code-split bundle) | Beta | Vite manualChunks split (largest chunk ~530 kB); no clustering on >10k node graphs yet. |
+| Dashboard (graph cockpit: architecture overview, layer drill, modes, inspector, path finder, file/code viewer, tour, persona) | Implemented (v1.3) | Vite manualChunks split (largest chunk 315 kB); 24 vitest unit + component tests; no graph virtualization on >10k node graphs yet. |
 | VS Code extension (commands, status view, CodeLens) | Beta | CodeLens for explain/review on Python/JS/TS; webview node-detail Planned. |
 | Fixture repos | Beta | `python_fastapi_service`, `ts_nestjs_app`, `react_next_app` landed; `ts_express_app`, `mixed_docs_config_repo`, `migration_database_repo` Planned. |
 | CI (lint, typecheck, security, tests, dashboard build, bundle-size guard) | Implemented | GitHub Actions; pnpm + pip caching. |
@@ -101,7 +101,39 @@ The dashboard in `apps/dashboard` is a Vite/React app backed by the local HTTP s
 devgraph dashboard
 ```
 
-The dashboard is a dark developer command center with command, graph, review, debug, onboarding, knowledge, and flow lenses backed by local HTTP APIs.
+The dashboard is a dark developer command center with command, graph, review,
+debug, onboarding, knowledge, and flow lenses backed by local HTTP APIs.
+
+**v1.3 graph cockpit** ships an Understand-Anything-style architecture
+explorer on top of the DevGraph engine:
+
+- **Architecture overview** — 9 derived layers (entry / ui / app / domain /
+  data / infra / tests / docs / memory) rendered as cluster nodes with
+  inter-layer edge weights.
+- **Layer detail** — drill into a layer to see folder/community containers
+  with expand-on-click, intra-container edges, and portal nodes that link
+  to other layers.
+- **Modes** — Overview, Architecture, Impact (changed + 1-hop), Flow
+  (left-to-right call/route/read/write chains), Community (Louvain
+  partition).
+- **Node inspector** — five tabs (overview, source, relations, provenance,
+  review impact) fed by `/api/node/:id`, `/api/file-context`,
+  `/api/provenance/:id`.
+- **Path finder** — pick a source and target node, get the shortest path
+  on the canvas via `/api/path`.
+- **File explorer** — directory tree with changed / affected / risk
+  badges; click a file to open the code viewer.
+- **Code viewer** — syntax highlight via `prism-react-renderer`, markdown
+  rendering for docs, per-line diff highlighting from
+  `review.changed_hunks`.
+- **Guided tour & learn panel** — 9-step walkthrough plus five persona
+  voices (junior / senior / reviewer / architect / ai-agent).
+- **Keyboard** — `⌘K` palette, `j`/`k` nav, `D` diff, `P` path, `F` files,
+  `T` tour.
+
+The dashboard's architecture endpoints (`/api/architecture`,
+`/api/layers/:id`, `/api/path`) are stable and intended for MCP / agent
+consumers as well.
 
 ## Architecture
 

@@ -1,12 +1,18 @@
 import {
+  architecturePayloadSchema,
   communitiesPayloadSchema,
   graphPayloadSchema,
   graphStatusSchema,
   handoffPayloadSchema,
+  layerDetailPayloadSchema,
+  pathPayloadSchema,
+  type ArchitecturePayload,
   type CommunitiesPayload,
   type GraphPayload,
   type GraphStatus,
   type HandoffPayload,
+  type LayerDetailPayload,
+  type PathPayload,
   reviewResultSchema,
   type ReviewResult
 } from "@devgraph/schema";
@@ -57,6 +63,35 @@ export class DevGraphClient {
 
   async search(query: string): Promise<unknown> {
     return this.getJson(`/api/search?q=${encodeURIComponent(query)}`);
+  }
+
+  async node(id: string): Promise<unknown> {
+    return this.getJson(`/api/node/${encodeURIComponent(id)}`);
+  }
+
+  async fileContext(path: string): Promise<unknown> {
+    return this.getJson(`/api/file-context?path=${encodeURIComponent(path)}`);
+  }
+
+  async provenance(entityId: string): Promise<unknown> {
+    return this.getJson(`/api/provenance/${encodeURIComponent(entityId)}`);
+  }
+
+  async path(source: string, target: string, cutoff = 8): Promise<PathPayload> {
+    const payload = await this.getJson(
+      `/api/path?source=${encodeURIComponent(source)}&target=${encodeURIComponent(target)}&cutoff=${cutoff}`
+    );
+    return pathPayloadSchema.parse(payload);
+  }
+
+  async architecture(): Promise<ArchitecturePayload> {
+    const payload = await this.getJson("/api/architecture");
+    return architecturePayloadSchema.parse(payload);
+  }
+
+  async layer(id: string): Promise<LayerDetailPayload> {
+    const payload = await this.getJson(`/api/layers/${encodeURIComponent(id)}`);
+    return layerDetailPayloadSchema.parse(payload);
   }
 
   private async getJson(path: string): Promise<unknown> {

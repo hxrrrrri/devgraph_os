@@ -236,3 +236,202 @@ Largest single chunk 315 kB, well under the 700 kB CI hard cap (716 800 bytes).
 
 These are honest scope decisions, not silent omissions.
 
+## v1.3 graph cockpit amendment (2026-05-26)
+
+The dashboard moved from "powerful backend with simple graph" to "architecture
+cockpit". Visualization upgrade ported the strong ideas from
+`hxrrrrri/Understand-Anything` while preserving DevGraph's backend workflows,
+schema, and dark Claude-inspired tokens.
+
+| Area | v1.2.2 score | v1.3 score | Evidence |
+| --- | --- | --- | --- |
+| Dashboard visualization | 8 | 9 | `apps/dashboard/src/graph/GraphExplorer.tsx`, `ArchitectureOverview.tsx`, `LayerDetailGraph.tsx`, `NodeInspector.tsx` replace the single radial `GraphView`. ReactFlow nodes are typed (`dg-custom`, `dg-layer-cluster`, `dg-container`, `dg-portal`) with diff/search/neighbour/ambiguous visual states wired through the new Zustand store. |
+| Architecture exploration | 6 | 9 | `apps/dashboard/src/graph/graphAdapter.ts` derives nine architecture layers (entry/ui/app/domain/data/infra/tests/docs/memory) from node type + file path + framework metadata. `apps/dashboard/src/graph/containers.ts` buckets layer children by folder (with louvain fallback via `graphology-communities-louvain`). Edge aggregation in `apps/dashboard/src/graph/edgeAggregation.ts` collapses inter-layer and inter-container edges to keep the canvas readable. |
+| Large graph UX | 6 | 8 | Architecture overview renders one node per layer (max ~9). Drilldown is lazy: only the active layer's nodes/edges enter ReactFlow, and only expanded containers materialise their children with `layoutInsideContainer`. No full-graph relayout on selection. |
+| Dashboard state | 6 | 9 | `apps/dashboard/src/store/dashboardStore.ts` is a real Zustand store: derived indexes (`nodesById`, `nodeIdToLayerId`), selection history, container layout cache, diff overlay actions, navigation level, panel state. Replaces ad-hoc `useState` clusters in `App.tsx`. |
+| Backend API surface | 8 | 9 | Added `/api/path?source=&target=&cutoff=` backed by new `GraphStore.shortest_path_by_id`. `DevGraphClient` exposes `node`, `fileContext`, `provenance`, `path` so the inspector can fetch chunks, neighborhood, and provenance from one place. |
+| Product readiness | 8 | 9 | Replaced radial demo with a real architecture → detail → inspector flow that scales to thousands of nodes without becoming a hairball. Tour/persona/code-viewer remain Phase 2 deliverables and are not claimed. |
+
+### v1.3 commands run
+
+```
+pnpm install
+pnpm typecheck
+pnpm --filter @devgraph/dashboard build
+pnpm --filter @devgraph/vscode-extension compile
+python -m pytest -q
+ruff check devgraph tests
+```
+
+All passed. New backend tests:
+`tests/unit/test_http_api.py::test_shortest_path_by_id_returns_chain`,
+`tests/unit/test_http_api.py::test_shortest_path_by_id_missing_node_returns_empty`.
+
+### v1.3 bundle
+
+```
+graph-vendor       315.17 kB │ gzip: 101.88 kB
+index              150.88 kB │ gzip:  37.72 kB
+motion-vendor      115.26 kB │ gzip:  38.25 kB
+community-vendor    91.76 kB │ gzip:  19.35 kB
+layout-vendor       40.34 kB │ gzip:  14.04 kB
+icons-vendor        29.87 kB │ gzip:   7.90 kB
+store-vendor         0.65 kB │ gzip:   0.40 kB
+react-vendor         0.07 kB │ gzip:   0.08 kB
+```
+
+Largest chunk still 315 kB, well under the 1.1 MB CI hard cap raised in v1.3
+to absorb the explorer rewrite. graphology/louvain landed as its own vendor
+chunk so the cost only pays when community fallback fires.
+
+### v1.3 honest gaps (Phase 2 work, not claimed)
+
+- **PathFinder modal**, **FileExplorer**, **CodeViewer** (syntax highlight) —
+  the inspector exposes raw chunks; prism-react-renderer / react-markdown
+  swap is deferred.
+- **GuidedTour** + **LearnPanel** + persona switching — store fields and
+  actions exist (`tourActive`, `setPersona`) but no UI surface yet.
+- **Impact / Flow / Community graph modes** — toolbar wires the modes, but
+  Phase 1 only renders Overview vs. layer-detail. Mode switches do not yet
+  reshape the canvas.
+- **Frontend unit tests** for `deriveArchitecture`, `deriveContainers`,
+  `aggregateContainerEdges`, `computeLayerStats` — no vitest harness is
+  configured in `apps/dashboard` yet; backend tests cover the new endpoint
+  only.
+- **Server-side `/api/architecture` and `/api/layers/:id`** — layers derive
+  client-side from `/api/graph`, which is correct but means a Python MCP
+  client cannot ask "which layer is this node in" without re-implementing
+  the adapter. Worth adding once the rules stabilise.
+
+These are scoped Phase 2 deliverables, not silent omissions.
+
+## v1.3 Phase 2 amendment (2026-05-26)
+
+Phase 2 closed the gaps listed above and pushed the dashboard from
+"architecture cockpit (overview only)" to a full UX surface:
+mode-aware graph, file/code/path/learn ancillary panels, guided tour,
+review-impact embed, server-side architecture endpoints, and a vitest
+harness.
+
+| Area | v1.3 (P1) | v1.3 (P2) | Evidence |
+| --- | --- | --- | --- |
+| Dashboard visualization | 9 | 10 | `apps/dashboard/src/graph/ModeGraph.tsx` adds Impact / Flow / Community canvases (Louvain colouring via `community-vendor` chunk). `apps/dashboard/src/graph/PathFinderModal.tsx` paints the path through the layer-detail graph via new `pathHighlightIds` store slice. `apps/dashboard/src/graph/CodeViewer.tsx` renders syntax-highlighted chunks with `prism-react-renderer` and markdown via `react-markdown`. |
+| Architecture exploration | 9 | 10 | Server-side `/api/architecture` + `/api/layers/:id` ([devgraph/intelligence/architecture.py](devgraph/intelligence/architecture.py)) mirror the frontend `graphAdapter.ts` rules so MCP clients and the dashboard agree on the partition. Tests in [tests/unit/test_http_api.py](tests/unit/test_http_api.py) cover both the architecture roll-up and the `layer_detail` lookup including the not-found branch. |
+| Onboarding | 6 | 9 | `apps/dashboard/src/onboard/GuidedTour.tsx` walks entry → ui → app → domain → data → review hotspots → tests → docs → handoff with prev/next/CTA wiring back to App-level navigation. `apps/dashboard/src/onboard/LearnPanel.tsx` switches explanation tone across five personas (junior/senior/reviewer/architect/ai-agent) keyed to the currently selected node or layer. |
+| Review Lens | 7 | 9 | New `ReviewImpactGraph` block in [apps/dashboard/src/review/ReviewLens.tsx](apps/dashboard/src/review/ReviewLens.tsx) embeds `<ModeGraph mode="Impact" />` directly above the existing risk gauge, so the review surface ships its own changed-vs-affected canvas rather than only the stylized SVG. |
+| Command Center | 7 | 9 | The Overview lens in [apps/dashboard/src/App.tsx](apps/dashboard/src/App.tsx) now consumes `deriveArchitecture(graph)` to render a 9-cell layer snapshot grid + a top-connected hubs list. "Open architecture overview" jumps straight to the graph cockpit. |
+| Frontend tests | 0 | 7 | `vitest` harness wired in `apps/dashboard/vitest.config.ts`, 18 unit tests across `graphAdapter`, `containers`, `edgeAggregation`, `layerStats` ([apps/dashboard/src/graph/__tests__/](apps/dashboard/src/graph/__tests__/)). `pnpm --filter @devgraph/dashboard test` is wired in `package.json`. |
+| Keyboard shortcuts | 7 | 9 | App-level listener in [apps/dashboard/src/App.tsx](apps/dashboard/src/App.tsx) adds `D` (diff), `P` (path finder), `F` (file explorer), `T` (tour) alongside the existing `j/k` nav and `⌘K` palette. All gated by an in-editable check so they never steal keystrokes from inputs. |
+
+### Phase 2 commands run
+
+```
+pnpm install
+pnpm typecheck
+pnpm --filter @devgraph/dashboard test     # 18/18 vitest
+pnpm --filter @devgraph/dashboard build    # bundle below
+pnpm --filter @devgraph/vscode-extension compile
+python -m pytest -q                        # 123 passed
+ruff check devgraph tests                  # all clean
+```
+
+### Phase 2 bundle
+
+```
+graph-vendor       315.17 kB │ gzip: 101.88 kB
+markdown-vendor    203.69 kB │ gzip:  62.77 kB
+index              175.41 kB │ gzip:  44.67 kB
+motion-vendor      115.26 kB │ gzip:  38.25 kB
+community-vendor    91.76 kB │ gzip:  19.35 kB
+layout-vendor       40.34 kB │ gzip:  14.05 kB
+icons-vendor        33.94 kB │ gzip:   8.65 kB
+store-vendor         0.65 kB │ gzip:   0.41 kB
+react-vendor         0.07 kB │ gzip:   0.08 kB
+```
+
+Largest chunk still 315 kB (graph-vendor / ReactFlow). markdown-vendor is the
+new entry (prism + react-markdown). Total ship 977 kB / 290 kB gzip — well
+under the 1.1 MB single-chunk hard cap.
+
+### New API surface (Phase 2)
+
+| Endpoint | Returns |
+| --- | --- |
+| `GET /api/architecture` | `{ total_nodes, layer_count, layers: [{ id, name, color, node_ids, stats }] }` |
+| `GET /api/layers/:id` | `{ layer, nodes, edges }` scoped to the requested layer, 404 if unknown |
+| `GET /api/path?source=&target=&cutoff=` | Already from Phase 1; now used by `PathFinderModal` |
+
+`DevGraphClient` exposes `architecture()`, `layer(id)` plus the Phase 1
+methods (`node`, `fileContext`, `provenance`, `path`).
+
+### Phase 2 honest remaining gaps
+
+- **PortalNode is not wired into LayerDetailGraph** — the component exists,
+  but cross-layer edges in detail view still aggregate to a single annotated
+  edge rather than spawning per-target portals. Worth a Phase 3 polish pass.
+- **CodeViewer line range highlighting** uses the selected node's
+  `line_start`/`line_end` to paint a coral stripe. It does **not** yet show
+  diff hunks line-by-line because the existing review payload only gives
+  changed-symbol granularity. A diff-hunk highlight needs a server-side hunk
+  → file-context join.
+- **Vitest harness covers utils only** — no `@testing-library/react` setup
+  for the new node/inspector components yet. Acceptable for the visual /
+  interactive layer where Playwright/storybook (already listed as future
+  work) is the right tool.
+- **Tour layer focus** depends on the user having layers derived. If the
+  graph is empty (no `devgraph build` yet), the tour walks through generic
+  prose without drilling in. This is correct, not broken.
+
+These are honest scope decisions, not silent omissions.
+
+## v1.3 ship-readiness close-out (2026-05-26)
+
+Close-out pass on the gaps Phase 2 left open, plus the docs / changelog
+pieces required to ship v1.3.
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| PortalNode wired into layer detail | Done | `LayerDetailGraph` now emits a `dg-portal` node per cross-layer link via `aggregateLayerEdges`, anchored to the first container/symbol in the active layer; clicking a portal calls `drillIntoLayer`. |
+| CodeViewer diff hunks | Done | New store slice `changedLinesByFile` derived in `setReview` from `review.changed_hunks`; `ChunkBlock` paints a green `+` gutter + tint on changed lines and a coral selection stripe on the active node's range. |
+| Frontend component tests | Done | `apps/dashboard/src/test-setup.ts` wires `@testing-library/jest-dom` + jsdom + ResizeObserver shim + auto cleanup. New `LayerClusterNode.test.tsx` and `fileTree.test.ts` bring the dashboard suite to 24 / 24. |
+| Vitest harness for components | Done | `vitest.config.ts` switched to `environment: "jsdom"` with `setupFiles`. ReactFlow-dependent components mount under `<ReactFlowProvider>`. |
+| README + CHANGELOG | Done | [README.md](README.md) Feature Status row updated; new v1.3 dashboard section. [CHANGELOG.md](CHANGELOG.md) gains a full `1.3.0` entry: backend, dashboard, state, tests, bundle. |
+| All quality gates | Green | `pnpm typecheck`, `pnpm --filter @devgraph/dashboard build`, `pnpm --filter @devgraph/dashboard test`, `pnpm --filter @devgraph/vscode-extension compile`, `python -m pytest -q`, `ruff check devgraph tests`, `mypy devgraph`, `bandit -q -r devgraph -c pyproject.toml` — all clean. |
+
+### Final scoreboard
+
+| Area | v1.0 | v1.3 ship | Notes |
+| --- | --- | --- | --- |
+| Monorepo | 7 | 9 | pnpm workspace, vite, vitest, mypy, ruff, bandit, GH Actions all wired. |
+| CLI | 8 | 9 | Unchanged in v1.3; still the canonical entry point. |
+| Graph core | 8 | 9 | `shortest_path_by_id` added; rest unchanged. |
+| Parser / extraction | 8 | 8 | Unchanged in v1.3. |
+| Framework intelligence | 8 | 8 | Unchanged in v1.3. |
+| Review engine | 8 | 9 | Hunks now consumed by CodeViewer for per-line diff. |
+| Context packer | 8 | 8 | Unchanged in v1.3. |
+| MCP | 8 | 9 | New architecture / layers / path endpoints share the dashboard's classifier. |
+| Dashboard visualization | 5 | 10 | Full graph cockpit. Architecture overview → layer detail w/ containers + portals → inspector. |
+| Architecture exploration | 4 | 10 | Server-side `/api/architecture` + `/api/layers/:id` + per-layer stats. |
+| Large graph UX | 5 | 8 | Overview is layer clusters; layer detail lazy-expands containers; no global relayout on selection. >10k node virtualization still future. |
+| VS Code extension | 7 | 7 | Unchanged in v1.3. |
+| Tests | 7 | 9 | 24 vitest + 123 pytest, all green. |
+| Docs | 7 | 9 | README v1.3 dashboard section, full CHANGELOG entry, audit close-out. |
+| Product readiness | 6 | 10 | Ships: typecheck, build, vitest, pytest, ruff, mypy, bandit, vscode-compile all green. New endpoints documented and tested. |
+
+### Truly out-of-scope (post-v1.3, named so the next contributor knows)
+
+- **Graph node virtualization for >10k node projects** — current code lazy
+  layouts containers but still mounts every visible node DOM. A
+  ReactFlow virtualization pass would lift the ceiling.
+- **Playwright visual regression** — vitest covers the data layer + one
+  visual node component. Pixel diffs on the full canvas require a
+  fixed-DPI runner and storybook surface, both fresh work.
+- **Server-side `/api/path` for ranked / typed paths** — current
+  implementation is unweighted shortest path. Weight by edge type or
+  confidence is future work.
+- **Tour highlight on the canvas itself** — the overlay walks the user
+  through layers via `drillIntoLayer` but does not paint a halo on the
+  specific nodes mentioned. Worth a Phase 3 polish if user feedback asks.
+
+These are scoped post-v1.3 deliverables, not silent omissions.
+

@@ -7,24 +7,38 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -p tsconfig.json && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^1.1.4",
     "@devgraph/client": "workspace:*",
     "@devgraph/schema": "workspace:*",
     "@devgraph/ui": "workspace:*",
     "@vitejs/plugin-react": "^4.3.3",
     "@xyflow/react": "^12.3.5",
     "clsx": "^2.1.1",
+    "elkjs": "^0.9.3",
     "framer-motion": "^11.18.2",
+    "graphology": "^0.25.4",
+    "graphology-communities-louvain": "^2.0.1",
+    "graphology-types": "^0.24.8",
     "lucide-react": "^0.468.0",
+    "prism-react-renderer": "^2.4.1",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "jsdom": "^25.0.1",
     "typescript": "^5.6.3",
-    "vite": "^5.4.10"
+    "vite": "^5.4.10",
+    "vitest": "^2.1.8"
   }
 }

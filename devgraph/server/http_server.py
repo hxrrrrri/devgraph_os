@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 from devgraph.config import DevGraphConfig
 from devgraph.core.graph_store import GraphStore
+from devgraph.intelligence.architecture import derive_architecture, layer_detail
 from devgraph.intelligence.communities import top_communities
 from devgraph.intelligence.debug import DebugEngine
 from devgraph.intelligence.flows import trace_flow
@@ -65,6 +66,39 @@ class DevGraphHttpHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/flows":
             query = parse_qs(parsed.query).get("q", [""])[0]
             self._json(trace_flow(self.store, query) if query else self.store.all_graph(limit=120))
+            return
+        if parsed.path == "/api/architecture":
+            self._json(derive_architecture(self.store))
+            return
+        if parsed.path.startswith("/api/layers/"):
+            layer_id = parsed.path.removeprefix("/api/layers/")
+            payload = layer_detail(self.store, layer_id)
+            if payload is None:
+                self._json({"error": f"layer '{layer_id}' not found"}, status=404)
+                return
+            self._json(payload)
+            return
+        if parsed.path == "/api/path":
+            qs = parse_qs(parsed.query)
+            source = qs.get("source", [""])[0]
+            target = qs.get("target", [""])[0]
+            try:
+                cutoff = int(qs.get("cutoff", ["8"])[0])
+            except ValueError:
+                cutoff = 8
+            cutoff = max(1, min(cutoff, 20))
+            if not source or not target:
+                self._json({"error": "source and target required"}, status=400)
+                return
+            nodes = self.store.shortest_path_by_id(source, target, cutoff=cutoff)
+            self._json(
+                {
+                    "source": source,
+                    "target": target,
+                    "found": bool(nodes),
+                    "nodes": [node.model_dump() for node in nodes],
+                }
+            )
             return
         if parsed.path.startswith("/api/node/"):
             node_id = parsed.path.removeprefix("/api/node/")
